@@ -1,0 +1,21 @@
+{
+  "name": "servicego-maroc",
+  "version": "1.0.0",
+  "private": true,
+  "description": "ServiceGO - marketplace de services pour tout le Maroc",
+  "scripts": {
+    "dev": "wrangler dev --local --port 8787",
+    "check": "wrangler types --check",
+    "types": "wrangler types",
+    "db:local": "wrangler d1 migrations apply servicego-db --local",
+    "db:remote": "wrangler d1 migrations apply servicego-db --remote",
+    "deploy": "wrangler deploy"
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.2",
+    "wrangler": "^4.135.0"
+  },
+  "dependencies": {
+    "leaflet": "^1.9.4"
+  }
+}

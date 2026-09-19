@@ -1,0 +1,7 @@
+# Leave these blank to run the complete local product flow without email delivery.
+# Add them when a verified Resend domain is ready.
+RESEND_API_KEY=
+RESEND_FROM_EMAIL="ServiceGO <hello@your-domain.com>"
+
+# Optional: enable Turnstile validation on account creation in production.
+TURNSTILE_SECRET_KEY=
