@@ -7,8 +7,8 @@
     "dev": "wrangler dev --local --port 8787",
     "check": "wrangler types --check",
     "types": "wrangler types",
-    "db:local": "wrangler d1 migrations apply servicego-db --local",
-    "db:remote": "wrangler d1 migrations apply servicego-db --remote",
+    "db:local": "wrangler d1 migrations apply servicego-production --local",
+    "db:remote": "wrangler d1 migrations apply servicego-production --remote",
     "deploy": "wrangler deploy"
   },
   "devDependencies": {

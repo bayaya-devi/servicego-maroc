@@ -20,8 +20,8 @@
   "d1_databases": [
     {
       "binding": "DB",
-      "database_name": "servicego-db",
-      "database_id": "00000000-0000-0000-0000-000000000000",
+      "database_name": "servicego-production",
+      "database_id": "0719fc2e-4837-4078-a414-5398a676832c",
       "migrations_dir": "./migrations"
     }
   ],
