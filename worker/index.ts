@@ -119,7 +119,10 @@ async function passwordMatches(password: string, stored: string): Promise<boolea
   const actual = await passwordHash(password, salt);
   const actualBytes = new TextEncoder().encode(actual);
   const expectedBytes = new TextEncoder().encode(stored);
-  return actualBytes.length === expectedBytes.length && crypto.subtle.timingSafeEqual(actualBytes, expectedBytes);
+  let difference = actualBytes.length ^ expectedBytes.length;
+  const length = Math.max(actualBytes.length, expectedBytes.length);
+  for (let index = 0; index < length; index += 1) difference |= (actualBytes[index] ?? 0) ^ (expectedBytes[index] ?? 0);
+  return difference === 0;
 }
 
 async function readBody(request: Request): Promise<Record<string, unknown> | null> {
