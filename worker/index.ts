@@ -22,6 +22,7 @@ const jsonHeaders = {
 };
 
 const moroccoBounds = { minLat: 27.55, maxLat: 35.95, minLng: -13.25, maxLng: -1.0 };
+const passwordIterations = 100000;
 
 function json(data: unknown, status = 200, headers: HeadersInit = {}): Response {
   return new Response(JSON.stringify(data), { status, headers: { ...jsonHeaders, ...headers } });
@@ -106,16 +107,16 @@ async function tokenHash(token: string): Promise<string> {
 async function passwordHash(password: string, salt = randomHex(16)): Promise<string> {
   const key = await crypto.subtle.importKey("raw", new TextEncoder().encode(password), "PBKDF2", false, ["deriveBits"]);
   const bits = await crypto.subtle.deriveBits(
-    { name: "PBKDF2", hash: "SHA-256", salt: fromHex(salt), iterations: 210000 },
+    { name: "PBKDF2", hash: "SHA-256", salt: fromHex(salt), iterations: passwordIterations },
     key,
     256,
   );
-  return `pbkdf2:210000:${salt}:${toHex(bits)}`;
+  return `pbkdf2:${passwordIterations}:${salt}:${toHex(bits)}`;
 }
 
 async function passwordMatches(password: string, stored: string): Promise<boolean> {
   const [algorithm, iterations, salt, expected] = stored.split(":");
-  if (algorithm !== "pbkdf2" || iterations !== "210000" || !salt || !expected) return false;
+  if (algorithm !== "pbkdf2" || iterations !== String(passwordIterations) || !salt || !expected) return false;
   const actual = await passwordHash(password, salt);
   const actualBytes = new TextEncoder().encode(actual);
   const expectedBytes = new TextEncoder().encode(stored);
@@ -681,7 +682,8 @@ export default {
     try {
       return await handleApi(request, env, ctx);
     } catch (error) {
-      console.error(JSON.stringify({ event: "api_error", path: url.pathname, message: error instanceof Error ? error.message : "unknown" }));
+      const message = error instanceof Error ? error.message : "unknown";
+      console.error(JSON.stringify({ event: "api_error", path: url.pathname, message }));
       return json({ error: "Une erreur est survenue. Reessayez." }, 500);
     }
   },
