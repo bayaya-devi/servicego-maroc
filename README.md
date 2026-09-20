@@ -36,7 +36,7 @@ Le projet contient maintenant une application Workers deployable :
 - publication de demandes et de services dans plusieurs villes marocaines ;
 - carte Leaflet interactive avec marqueurs bleus pour les besoins et verts pour les services ;
 - reponse a une demande, demande directe a un prestataire, messagerie et acceptation d'offre via l'API ;
-- ajout d'une photo vers Cloudflare R2 ;
+- ajout d'une photo vers Cloudflare R2 des que le stockage est active sur le compte Cloudflare ;
 - confirmation d'email a la creation, renvoi de lien, et changement d'adresse par lien Resend ;
 - workflow GitHub Actions pour appliquer les migrations et deployer.
 

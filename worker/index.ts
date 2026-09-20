@@ -642,20 +642,24 @@ async function handleApi(request: Request, env: Env, ctx: ExecutionContext): Pro
     if (isResponse(user)) return user;
     const verificationError = requireVerifiedUser(user);
     if (verificationError) return verificationError;
+    const uploads = (env as Env & { UPLOADS?: R2Bucket }).UPLOADS;
+    if (!uploads) return json({ error: "Les photos seront disponibles prochainement." }, 503);
     const form = await request.formData();
     const file = form.get("file");
     if (!(file instanceof File) || file.size === 0 || file.size > 6 * 1024 * 1024) return badRequest("Choisissez une image de 6 Mo maximum.");
     if (!file.type.startsWith("image/")) return badRequest("Seules les images sont acceptees.");
     const extension = file.name.split(".").pop()?.toLowerCase().replace(/[^a-z0-9]/g, "") || "jpg";
     const key = `uploads/${user.id}/${crypto.randomUUID()}.${extension}`;
-    await env.UPLOADS.put(key, file.stream(), { httpMetadata: { contentType: file.type }, customMetadata: { userId: user.id } });
+    await uploads.put(key, file.stream(), { httpMetadata: { contentType: file.type }, customMetadata: { userId: user.id } });
     return json({ key, url: `/api/files/${key}` }, 201);
   }
 
   if (pathname.startsWith("/api/files/") && request.method === "GET") {
+    const uploads = (env as Env & { UPLOADS?: R2Bucket }).UPLOADS;
+    if (!uploads) return notFound();
     const key = decodeURIComponent(pathname.slice("/api/files/".length));
     if (!key.startsWith("uploads/") || key.includes("..")) return notFound();
-    const object = await env.UPLOADS.get(key);
+    const object = await uploads.get(key);
     if (!object) return notFound();
     const headers = new Headers();
     object.writeHttpMetadata(headers);
