@@ -9,6 +9,7 @@ type User = {
   rating: number;
   review_count: number;
   is_admin: number;
+  email_verified: number;
 };
 
 type AuthUser = User & { password_hash: string };
@@ -91,6 +92,17 @@ function randomHex(length: number): string {
   return toHex(bytes.buffer);
 }
 
+function randomToken(): string {
+  const bytes = crypto.getRandomValues(new Uint8Array(32));
+  let value = "";
+  for (const byte of bytes) value += String.fromCharCode(byte);
+  return btoa(value).replaceAll("+", "-").replaceAll("/", "_").replaceAll("=", "");
+}
+
+async function tokenHash(token: string): Promise<string> {
+  return toHex(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(token)));
+}
+
 async function passwordHash(password: string, salt = randomHex(16)): Promise<string> {
   const key = await crypto.subtle.importKey("raw", new TextEncoder().encode(password), "PBKDF2", false, ["deriveBits"]);
   const bits = await crypto.subtle.deriveBits(
@@ -123,7 +135,7 @@ async function currentUser(request: Request, env: Env): Promise<User | null> {
   const sessionId = getCookie(request, "sg_session");
   if (!sessionId) return null;
   return env.DB.prepare(
-    `SELECT p.id, p.email, p.full_name, p.phone, p.district, p.avatar_url, p.bio, p.rating, p.review_count, p.is_admin
+    `SELECT p.id, p.email, p.full_name, p.phone, p.district, p.avatar_url, p.bio, p.rating, p.review_count, p.is_admin, p.email_verified
      FROM sessions s JOIN profiles p ON p.id = s.user_id
      WHERE s.id = ? AND s.expires_at > datetime('now') AND p.is_active = 1`,
   )
@@ -137,6 +149,10 @@ async function requireUser(request: Request, env: Env): Promise<User | Response>
 
 function isResponse(value: User | Response): value is Response {
   return value instanceof Response;
+}
+
+function requireVerifiedUser(user: User): Response | null {
+  return user.email_verified ? null : json({ error: "Confirmez votre adresse email avant de publier ou contacter un utilisateur." }, 403);
 }
 
 async function createSession(userId: string, env: Env): Promise<string> {
@@ -161,6 +177,31 @@ async function sendEmail(env: Env, recipient: string, subject: string, html: str
     body: JSON.stringify({ from, to: [recipient], subject, html }),
   });
   if (!response.ok) console.warn(JSON.stringify({ event: "resend_failed", status: response.status }));
+}
+
+async function createEmailVerification(env: Env, userId: string, email: string, purpose: "signup" | "change_email"): Promise<string> {
+  const token = randomToken();
+  await env.DB.prepare("UPDATE email_verifications SET used_at = CURRENT_TIMESTAMP WHERE user_id = ? AND purpose = ? AND used_at IS NULL")
+    .bind(userId, purpose)
+    .run();
+  await env.DB.prepare(
+    "INSERT INTO email_verifications (id, user_id, email, purpose, token_hash, expires_at) VALUES (?, ?, ?, ?, ?, datetime('now', '+24 hours'))",
+  )
+    .bind(crypto.randomUUID(), userId, email, purpose, await tokenHash(token))
+    .run();
+  return token;
+}
+
+async function sendVerificationEmail(env: Env, email: string, fullName: string, token: string, origin: string, purpose: "signup" | "change_email"): Promise<void> {
+  const link = `${origin}/api/auth/verify-email?token=${encodeURIComponent(token)}`;
+  const subject = purpose === "signup" ? "Confirmez votre compte ServiceGO" : "Confirmez votre nouvelle adresse ServiceGO";
+  const intro = purpose === "signup" ? "Confirmez votre adresse pour activer votre compte." : "Confirmez cette adresse pour terminer sa modification.";
+  await sendEmail(
+    env,
+    email,
+    subject,
+    `<p>Bonjour ${escapeHtml(fullName)},</p><p>${intro}</p><p><a href="${escapeHtml(link)}">Confirmer mon adresse</a></p><p>Ce lien expire dans 24 heures.</p>`,
+  );
 }
 
 async function verifyTurnstile(token: string, request: Request, env: Env): Promise<boolean> {
@@ -194,6 +235,27 @@ async function findOrCreateConversation(env: Env, requestId: string, firstUserId
 }
 
 async function handleAuth(request: Request, env: Env, ctx: ExecutionContext, pathname: string): Promise<Response | null> {
+  if (pathname === "/api/auth/verify-email" && request.method === "GET") {
+    const token = new URL(request.url).searchParams.get("token") ?? "";
+    if (!token) return badRequest("Lien de confirmation invalide.");
+    const verification = await env.DB.prepare(
+      "SELECT id, user_id, email FROM email_verifications WHERE token_hash = ? AND used_at IS NULL AND expires_at > datetime('now')",
+    )
+      .bind(await tokenHash(token))
+      .first<{ id: string; user_id: string; email: string }>();
+    if (!verification) return badRequest("Ce lien est invalide ou expire.");
+    const existing = await env.DB.prepare("SELECT id FROM profiles WHERE email = ? AND id <> ?")
+      .bind(verification.email, verification.user_id)
+      .first<{ id: string }>();
+    if (existing) return badRequest("Cette adresse est deja utilisee.");
+    await env.DB.batch([
+      env.DB.prepare("UPDATE profiles SET email = ?, email_verified = 1, updated_at = CURRENT_TIMESTAMP WHERE id = ?")
+        .bind(verification.email, verification.user_id),
+      env.DB.prepare("UPDATE email_verifications SET used_at = CURRENT_TIMESTAMP WHERE id = ?").bind(verification.id),
+    ]);
+    return Response.redirect(`${new URL(request.url).origin}/?email_verified=1`, 302);
+  }
+
   if (pathname === "/api/auth/logout" && request.method === "POST") {
     const id = getCookie(request, "sg_session");
     if (id) await env.DB.prepare("DELETE FROM sessions WHERE id = ?").bind(id).run();
@@ -220,13 +282,14 @@ async function handleAuth(request: Request, env: Env, ctx: ExecutionContext, pat
       .bind(id, email, await passwordHash(password), fullName, text(body.phone, 30) || null, district)
       .run();
     const sessionId = await createSession(id, env);
-    ctx.waitUntil(sendEmail(env, email, "Bienvenue sur ServiceGO", `<p>Bonjour ${escapeHtml(fullName)},</p><p>Bienvenue sur ServiceGO Maroc. Vous pouvez maintenant demander et proposer des services avec le meme compte.</p>`));
+    const verificationToken = await createEmailVerification(env, id, email, "signup");
+    ctx.waitUntil(sendVerificationEmail(env, email, fullName, verificationToken, new URL(request.url).origin, "signup"));
     const user = await currentUser(new Request(request.url, { headers: { cookie: `sg_session=${sessionId}` } }), env);
     return json({ user }, 201, { "set-cookie": sessionCookie(sessionId, request) });
   }
 
   const account = await env.DB.prepare(
-    "SELECT id, email, full_name, phone, district, avatar_url, bio, rating, review_count, is_admin, password_hash FROM profiles WHERE email = ? AND is_active = 1",
+    "SELECT id, email, full_name, phone, district, avatar_url, bio, rating, review_count, is_admin, email_verified, password_hash FROM profiles WHERE email = ? AND is_active = 1",
   )
     .bind(email)
     .first<AuthUser>();
@@ -304,6 +367,33 @@ async function handleApi(request: Request, env: Env, ctx: ExecutionContext): Pro
     return json({ ok: true });
   }
 
+  if (pathname === "/api/me/email" && request.method === "POST") {
+    const user = await requireUser(request, env);
+    if (isResponse(user)) return user;
+    const body = await readBody(request);
+    if (!body) return badRequest("Informations invalides.");
+    const nextEmail = text(body.new_email, 254).toLowerCase();
+    const currentPassword = text(body.current_password, 200);
+    if (!validEmail(nextEmail) || !currentPassword) return badRequest("Indiquez une nouvelle adresse valide et votre mot de passe actuel.");
+    if (nextEmail === user.email) return badRequest("C'est deja votre adresse actuelle.");
+    const exists = await env.DB.prepare("SELECT id FROM profiles WHERE email = ?").bind(nextEmail).first<{ id: string }>();
+    if (exists) return json({ error: "Cette adresse est deja utilisee." }, 409);
+    const account = await env.DB.prepare("SELECT password_hash FROM profiles WHERE id = ?").bind(user.id).first<{ password_hash: string }>();
+    if (!account || !(await passwordMatches(currentPassword, account.password_hash))) return json({ error: "Mot de passe actuel incorrect." }, 401);
+    const token = await createEmailVerification(env, user.id, nextEmail, "change_email");
+    ctx.waitUntil(sendVerificationEmail(env, nextEmail, user.full_name, token, new URL(request.url).origin, "change_email"));
+    return json({ message: "Un lien de confirmation a ete envoye a la nouvelle adresse." }, 202);
+  }
+
+  if (pathname === "/api/auth/resend-verification" && request.method === "POST") {
+    const user = await requireUser(request, env);
+    if (isResponse(user)) return user;
+    if (user.email_verified) return badRequest("Votre adresse est deja confirmee.");
+    const token = await createEmailVerification(env, user.id, user.email, "signup");
+    ctx.waitUntil(sendVerificationEmail(env, user.email, user.full_name, token, new URL(request.url).origin, "signup"));
+    return json({ message: "Un nouveau lien de confirmation a ete envoye." }, 202);
+  }
+
   if (pathname === "/api/admin/overview" && request.method === "GET") {
     const user = await requireUser(request, env);
     if (isResponse(user)) return user;
@@ -333,6 +423,8 @@ async function handleApi(request: Request, env: Env, ctx: ExecutionContext): Pro
   if (pathname === "/api/requests" && request.method === "POST") {
     const user = await requireUser(request, env);
     if (isResponse(user)) return user;
+    const verificationError = requireVerifiedUser(user);
+    if (verificationError) return verificationError;
     const body = await readBody(request);
     if (!body) return badRequest("Informations invalides.");
     const categoryId = text(body.category_id, 60);
@@ -372,6 +464,8 @@ async function handleApi(request: Request, env: Env, ctx: ExecutionContext): Pro
   if (pathname === "/api/services" && request.method === "POST") {
     const user = await requireUser(request, env);
     if (isResponse(user)) return user;
+    const verificationError = requireVerifiedUser(user);
+    if (verificationError) return verificationError;
     const body = await readBody(request);
     if (!body) return badRequest("Informations invalides.");
     const categoryId = text(body.category_id, 60);
@@ -415,6 +509,8 @@ async function handleApi(request: Request, env: Env, ctx: ExecutionContext): Pro
   if (offerMatch && request.method === "POST") {
     const user = await requireUser(request, env);
     if (isResponse(user)) return user;
+    const verificationError = requireVerifiedUser(user);
+    if (verificationError) return verificationError;
     const body = await readBody(request);
     if (!body) return badRequest("Informations invalides.");
     const requestItem = await env.DB.prepare("SELECT id, requester_id, title FROM service_requests WHERE id = ? AND status = 'open'")
@@ -441,6 +537,8 @@ async function handleApi(request: Request, env: Env, ctx: ExecutionContext): Pro
   if (acceptMatch && request.method === "POST") {
     const user = await requireUser(request, env);
     if (isResponse(user)) return user;
+    const verificationError = requireVerifiedUser(user);
+    if (verificationError) return verificationError;
     const offer = await env.DB.prepare(
       `SELECT o.id, o.request_id, o.provider_id, r.requester_id, r.title
        FROM offers o JOIN service_requests r ON r.id = o.request_id WHERE o.id = ? AND o.status = 'pending'`,
@@ -461,6 +559,8 @@ async function handleApi(request: Request, env: Env, ctx: ExecutionContext): Pro
   if (serviceRequestMatch && request.method === "POST") {
     const user = await requireUser(request, env);
     if (isResponse(user)) return user;
+    const verificationError = requireVerifiedUser(user);
+    if (verificationError) return verificationError;
     const body = await readBody(request);
     if (!body) return badRequest("Informations invalides.");
     const service = await env.DB.prepare("SELECT id, user_id, category_id, title FROM user_services WHERE id = ? AND available = 1")
@@ -522,6 +622,8 @@ async function handleApi(request: Request, env: Env, ctx: ExecutionContext): Pro
       return json({ messages: results });
     }
     if (request.method === "POST") {
+      const verificationError = requireVerifiedUser(user);
+      if (verificationError) return verificationError;
       const body = await readBody(request);
       const message = text(body?.body, 2000);
       if (!message) return badRequest("Ecrivez un message.");
@@ -538,6 +640,8 @@ async function handleApi(request: Request, env: Env, ctx: ExecutionContext): Pro
   if (pathname === "/api/uploads" && request.method === "POST") {
     const user = await requireUser(request, env);
     if (isResponse(user)) return user;
+    const verificationError = requireVerifiedUser(user);
+    if (verificationError) return verificationError;
     const form = await request.formData();
     const file = form.get("file");
     if (!(file instanceof File) || file.size === 0 || file.size > 6 * 1024 * 1024) return badRequest("Choisissez une image de 6 Mo maximum.");

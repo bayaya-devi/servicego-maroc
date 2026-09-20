@@ -26,7 +26,7 @@ ServiceGO doit utiliser Cloudflare autant que possible :
 - Cloudflare WAF, cache et rate limiting pour la protection.
 - Cloudflare Analytics/Logs pour le suivi technique.
 
-Auth : Cloudflare ne fournit pas une authentification marketplace grand public cle en main. Le MVP utilisera donc une auth custom dans Workers avec D1, cookies signes/sessions, hashing de mot de passe, et Turnstile. Email/SMS OTP peut etre ajoute avec un fournisseur externe si necessaire.
+Auth : Cloudflare ne fournit pas une authentification marketplace grand public cle en main. Le MVP utilise donc une auth custom dans Workers avec D1, sessions HTTP-only, hashing de mot de passe, confirmation d'email Resend et Turnstile.
 
 ## Application fonctionnelle
 
@@ -37,7 +37,7 @@ Le projet contient maintenant une application Workers deployable :
 - carte Leaflet interactive avec marqueurs bleus pour les besoins et verts pour les services ;
 - reponse a une demande, demande directe a un prestataire, messagerie et acceptation d'offre via l'API ;
 - ajout d'une photo vers Cloudflare R2 ;
-- notifications email Resend quand les secrets sont configures ;
+- confirmation d'email a la creation, renvoi de lien, et changement d'adresse par lien Resend ;
 - workflow GitHub Actions pour appliquer les migrations et deployer.
 
 ## Demarrage local
@@ -59,9 +59,12 @@ npx wrangler dev --local --port 8788
 1. Se connecter a Cloudflare avec `npx wrangler login`.
 2. Creer les ressources : `npx wrangler d1 create servicego-db` et `npx wrangler r2 bucket create servicego-uploads`.
 3. Copier l'identifiant D1 renvoye par Cloudflare dans `wrangler.jsonc` a la place de `00000000-0000-0000-0000-000000000000`.
-4. Configurer les secrets : `RESEND_API_KEY`, `RESEND_FROM_EMAIL` et `TURNSTILE_SECRET_KEY` avec `npx wrangler secret put`.
-5. Appliquer la base distante avec `npm run db:remote`, puis deployer avec `npm run deploy`.
-6. Pour GitHub Actions, ajouter `CLOUDFLARE_API_TOKEN`, `CLOUDFLARE_ACCOUNT_ID`, `RESEND_API_KEY`, `RESEND_FROM_EMAIL` et `TURNSTILE_SECRET_KEY` dans les secrets du depot.
+4. Dans Resend, verifier le domaine d'envoi puis choisir une adresse telle que `ServiceGO <bonjour@servicego.ma>`.
+5. Configurer les secrets : `npx wrangler secret put RESEND_API_KEY` et `npx wrangler secret put RESEND_FROM_EMAIL`. Ajouter `TURNSTILE_SECRET_KEY` lorsque Turnstile est active.
+6. Appliquer la base distante avec `npm run db:remote`, puis deployer avec `npm run deploy`.
+7. Pour GitHub Actions, ajouter `CLOUDFLARE_API_TOKEN`, `CLOUDFLARE_ACCOUNT_ID`, `RESEND_API_KEY`, `RESEND_FROM_EMAIL` et `TURNSTILE_SECRET_KEY` dans les secrets du depot.
+
+Les liens de confirmation expirent au bout de 24 heures. Tant qu'une adresse n'est pas confirmee, le compte peut se connecter mais ne peut ni publier, ni repondre, ni lancer une discussion. Cela limite les faux comptes sans creer deux types d'utilisateurs.
 
 La carte utilise Leaflet embarque dans le site. Par defaut, les tuiles OpenStreetMap sont adaptees au developpement et a un faible trafic. Pour un lancement commercial avec trafic significatif, remplacez `MAP_TILE_URL` et `MAP_ATTRIBUTION` dans `wrangler.jsonc` par un fournisseur de tuiles avec contrat/SLA ou par votre propre infrastructure; les tuiles publiques OpenStreetMap ne garantissent pas un service commercial a volume eleve.
 
