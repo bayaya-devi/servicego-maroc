@@ -6,7 +6,7 @@
   "scripts": {
     "dev": "wrangler dev --local --port 8787",
     "test": "node --test tests/*.test.mjs",
-    "check": "wrangler types --check",
+    "check": "wrangler types",
     "types": "wrangler types",
     "db:local": "wrangler d1 migrations apply servicego-production --local",
     "db:remote": "wrangler d1 migrations apply servicego-production --remote",
