@@ -276,7 +276,7 @@ async function handleAuth(request: Request, env: Env, ctx: ExecutionContext, pat
 
   if (pathname === "/api/auth/register") {
     const fullName = text(body.full_name, 80);
-    const district = text(body.district, 80) || "Casablanca";
+    const district = text(body.district, 80) || "Rabat";
     if (fullName.length < 2) return badRequest("Indiquez votre prenom et nom.");
     if (!(await verifyTurnstile(text(body.turnstile_token, 2048), request, env))) return badRequest("Verification anti-abus invalide.");
     const exists = await env.DB.prepare("SELECT id FROM profiles WHERE email = ?").bind(email).first<{ id: string }>();
@@ -324,14 +324,22 @@ async function handleApi(request: Request, env: Env, ctx: ExecutionContext): Pro
   }
 
   if (pathname === "/api/map" && request.method === "GET") {
+    const user = await requireUser(request, env);
+    if (isResponse(user)) return user;
     const [requests, services] = await Promise.all([
       env.DB.prepare(
-        `SELECT r.*, c.name AS category_name, c.icon AS category_icon, p.full_name AS requester_name
+        `SELECT r.id, r.requester_id, r.category_id, r.title, r.description, r.district,
+                ROUND(r.latitude, 2) AS latitude, ROUND(r.longitude, 2) AS longitude,
+                r.urgency, r.budget_hint, r.photo_key, r.status, r.created_at,
+                c.name AS category_name, c.icon AS category_icon, p.full_name AS requester_name
          FROM service_requests r JOIN categories c ON c.id = r.category_id JOIN profiles p ON p.id = r.requester_id
          WHERE r.status = 'open' ORDER BY r.urgency DESC, r.created_at DESC LIMIT 100`,
       ).all(),
       env.DB.prepare(
-        `SELECT s.*, c.name AS category_name, c.icon AS category_icon, p.full_name, p.rating, p.review_count
+        `SELECT s.id, s.user_id, s.category_id, s.title, s.description, s.district,
+                ROUND(s.latitude, 2) AS latitude, ROUND(s.longitude, 2) AS longitude,
+                s.price_hint, s.available, s.created_at,
+                c.name AS category_name, c.icon AS category_icon, p.full_name, p.rating, p.review_count
          FROM user_services s JOIN categories c ON c.id = s.category_id JOIN profiles p ON p.id = s.user_id
          WHERE s.available = 1 AND p.is_active = 1 ORDER BY s.created_at DESC LIMIT 100`,
       ).all(),
@@ -350,7 +358,7 @@ async function handleApi(request: Request, env: Env, ctx: ExecutionContext): Pro
     const bio = text(body.bio, 500);
     if (fullName.length < 2) return badRequest("Indiquez votre prenom et nom.");
     await env.DB.prepare("UPDATE profiles SET full_name = ?, phone = ?, district = ?, bio = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?")
-      .bind(fullName, phone || null, district || "Casablanca", bio || null, user.id)
+      .bind(fullName, phone || null, district || "Rabat", bio || null, user.id)
       .run();
     return json({ user: await currentUser(request, env) });
   }
@@ -434,7 +442,7 @@ async function handleApi(request: Request, env: Env, ctx: ExecutionContext): Pro
     const categoryId = text(body.category_id, 60);
     const title = text(body.title, 100);
     const description = text(body.description, 1200);
-    const district = text(body.district, 80) || "Casablanca";
+    const district = text(body.district, 80) || "Rabat";
     const latitude = Number(body.latitude);
     const longitude = Number(body.longitude);
     const urgency = body.urgency === "urgent" ? "urgent" : "normal";
@@ -475,7 +483,7 @@ async function handleApi(request: Request, env: Env, ctx: ExecutionContext): Pro
     const categoryId = text(body.category_id, 60);
     const title = text(body.title, 100);
     const description = text(body.description, 1200);
-    const district = text(body.district, 80) || "Casablanca";
+    const district = text(body.district, 80) || "Rabat";
     const latitude = Number(body.latitude);
     const longitude = Number(body.longitude);
     if (!categoryId || title.length < 3 || description.length < 5 || !insideMorocco(latitude, longitude)) {
@@ -582,7 +590,7 @@ async function handleApi(request: Request, env: Env, ctx: ExecutionContext): Pro
       `INSERT INTO service_requests (id, requester_id, target_service_id, category_id, title, description, district, latitude, longitude, urgency, budget_hint)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     )
-      .bind(requestId, user.id, service.id, service.category_id, title, description, text(body.district, 80) || "Casablanca", latitude, longitude, body.urgency === "urgent" ? "urgent" : "normal", text(body.budget_hint, 80) || null)
+      .bind(requestId, user.id, service.id, service.category_id, title, description, text(body.district, 80) || "Rabat", latitude, longitude, body.urgency === "urgent" ? "urgent" : "normal", text(body.budget_hint, 80) || null)
       .run();
     const conversationId = await findOrCreateConversation(env, requestId, user.id, service.user_id);
     await env.DB.prepare("INSERT INTO messages (id, conversation_id, sender_id, body) VALUES (?, ?, ?, ?)")

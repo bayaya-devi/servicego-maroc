@@ -19,6 +19,10 @@ const state = {
   mine: { requests: [], services: [] },
   offers: { request: null, items: [] },
   adminStats: null,
+  locale: localStorage.getItem("servicego-locale") || "fr",
+  mapFilter: "all",
+  mapCategory: "all",
+  mapMode: "2d",
 };
 let leafletMap = null;
 const cities = {
@@ -44,6 +48,29 @@ function escape(value) {
       ],
   );
 }
+const uiTranslations = {
+  en: {
+    "Partout au Maroc":"Across Morocco","Un besoin. Une personne proche. Une solution.":"One need. Someone nearby. One solution.","Demandez un service ou proposez votre savoir-faire avec le meme compte.":"Request a service or offer your skills with the same account.","Commencer":"Get started","Voir l'apercu":"View preview","Apercu avant connexion":"Preview before sign in","Connectez-vous pour utiliser la carte":"Sign in to use the map","Se connecter":"Sign in","Creer un compte":"Create account","Carte":"Map","Messages":"Messages","Profil":"Profile","Admin":"Admin","Demandes":"Requests","Services":"Services","Mise en relation":"Connection","Que voulez-vous faire ?":"What would you like to do?","Demander":"Request","Proposer":"Offer","Publier un besoin":"Post a need","Rendre un service visible":"Make a service visible","Services autour de vous":"Services around you","Les positions affichees sont approximatives":"Displayed locations are approximate","Tout":"All","Toutes categories":"All categories","Liste accessible":"Accessible list","Selection":"Selection","Appuyez sur une bulle":"Choose a bubble","Repondre":"Reply","Voir les reponses":"View replies","Demander ce service":"Request this service","Vos discussions":"Your conversations","Choisissez une discussion.":"Choose a conversation.","Votre compte ServiceGO":"Your ServiceGO account","Modifier":"Edit","Administration":"Administration","Tableau de bord":"Dashboard","Utilisateurs":"Users","Demandes ouvertes":"Open requests","Services actifs":"Active services","Conversations":"Conversations","Action rapide":"Quick action","Se deconnecter":"Sign out","A propos":"About","Fermer":"Close","Langue":"Language","Bon retour":"Welcome back","Creez votre compte":"Create your account","Prenom et nom":"Full name","Telephone":"Phone","Ville":"City","Email":"Email","Mot de passe":"Password","Enregistrer":"Save","Envoyer":"Send","Urgence":"Urgency","Normale":"Normal","Urgent":"Urgent","Publier sur la carte":"Publish on map","Me rendre visible":"Make me visible"
+  },
+  ar: {
+    "Partout au Maroc":"في جميع أنحاء المغرب","Un besoin. Une personne proche. Une solution.":"حاجة واحدة. شخص قريب. حل واحد.","Demandez un service ou proposez votre savoir-faire avec le meme compte.":"اطلب خدمة أو اعرض مهارتك بالحساب نفسه.","Commencer":"ابدأ","Voir l'apercu":"عرض المعاينة","Apercu avant connexion":"معاينة قبل الدخول","Connectez-vous pour utiliser la carte":"سجل الدخول لاستعمال الخريطة","Se connecter":"تسجيل الدخول","Creer un compte":"إنشاء حساب","Carte":"الخريطة","Messages":"الرسائل","Profil":"الملف","Admin":"الإدارة","Demandes":"الطلبات","Services":"الخدمات","Mise en relation":"التواصل","Que voulez-vous faire ?":"ماذا تريد أن تفعل؟","Demander":"اطلب","Proposer":"اعرض","Publier un besoin":"انشر حاجة","Rendre un service visible":"أظهر خدمتك","Services autour de vous":"خدمات قريبة منك","Les positions affichees sont approximatives":"المواقع المعروضة تقريبية","Tout":"الكل","Toutes categories":"كل الفئات","Liste accessible":"قائمة ميسرة","Selection":"الاختيار","Appuyez sur une bulle":"اختر فقاعة","Repondre":"أجب","Voir les reponses":"عرض الردود","Demander ce service":"اطلب هذه الخدمة","Vos discussions":"محادثاتك","Choisissez une discussion.":"اختر محادثة.","Votre compte ServiceGO":"حسابك في ServiceGO","Modifier":"تعديل","Administration":"الإدارة","Tableau de bord":"لوحة التحكم","Utilisateurs":"المستخدمون","Demandes ouvertes":"الطلبات المفتوحة","Services actifs":"الخدمات النشطة","Conversations":"المحادثات","Action rapide":"إجراء سريع","Se deconnecter":"تسجيل الخروج","A propos":"حول","Fermer":"إغلاق","Langue":"اللغة","Bon retour":"مرحبا بعودتك","Creez votre compte":"أنشئ حسابك","Prenom et nom":"الاسم الكامل","Telephone":"الهاتف","Ville":"المدينة","Email":"البريد الإلكتروني","Mot de passe":"كلمة المرور","Enregistrer":"حفظ","Envoyer":"إرسال","Urgence":"الاستعجال","Normale":"عادي","Urgent":"عاجل","Publier sur la carte":"انشر على الخريطة","Me rendre visible":"أظهر خدمتي"
+  }
+};
+function localizeDom() {
+  if (state.locale === "fr") return;
+  const dictionary = uiTranslations[state.locale] || {};
+  const walker = document.createTreeWalker(app, NodeFilter.SHOW_TEXT);
+  let node;
+  while ((node = walker.nextNode())) {
+    const raw = node.nodeValue;
+    const value = raw.trim();
+    if (dictionary[value]) node.nodeValue = raw.replace(value, dictionary[value]);
+  }
+  app.querySelectorAll("[placeholder]").forEach((element) => {
+    const value = element.getAttribute("placeholder");
+    if (dictionary[value]) element.setAttribute("placeholder", dictionary[value]);
+  });
+}
 async function api(path, options = {}) {
   const settings = {
     credentials: "same-origin",
@@ -68,7 +95,7 @@ function notify(message, isError = false) {
   setTimeout(() => element.remove(), 3600);
 }
 function coordsFromCity(city) {
-  const [lat, lng] = cities[city] || cities.Casablanca;
+  const [lat, lng] = cities[city] || cities.Rabat;
   return { latitude: lat, longitude: lng };
 }
 function pointStyle(latitude, longitude, i = 0) {
@@ -93,7 +120,7 @@ function categoryOptions(selected = "") {
     )
     .join("");
 }
-function cityOptions(selected = "Casablanca") {
+function cityOptions(selected = "Rabat") {
   return Object.keys(cities)
     .map(
       (city) =>
@@ -102,17 +129,18 @@ function cityOptions(selected = "Casablanca") {
     .join("");
 }
 function brand() {
-  return `<button class="brand" data-action="home" aria-label="ServiceGO accueil"><span class="brand-mark"><b>?</b><i></i><b>v</b></span><strong>Service<span>GO</span></strong></button>`;
+  return `<button class="brand" data-action="home" aria-label="ServiceGO accueil"><img src="/assets/servicego-symbol.png" width="48" height="48" alt=""><strong>Service<span>GO</span></strong></button>`;
 }
 function header() {
   const signedIn = Boolean(state.user);
-  return `<header class="topbar">${brand()}<nav class="top-actions">${signedIn ? `    <button class="nav-button ${state.view === "map" ? "active" : ""}" data-action="view" data-view="map">Carte</button>    <button class="nav-button ${state.view === "messages" ? "active" : ""}" data-action="view" data-view="messages">Messages</button>    <button class="nav-button ${state.view === "profile" ? "active" : ""}" data-action="view" data-view="profile">Profil</button>    <button class="button outline" data-action="logout">Sortir</button>` : `<button class="button" data-action="open-auth">Se connecter</button>`}</nav></header>`;
+  const locale = `<label class="sr-only" for="locale">Langue</label><select id="locale" class="locale-select" data-action="locale" aria-label="Langue"><option value="fr" ${state.locale === "fr" ? "selected" : ""}>FR</option><option value="en" ${state.locale === "en" ? "selected" : ""}>EN</option><option value="ar" ${state.locale === "ar" ? "selected" : ""}>AR</option></select>`;
+  return `<header class="topbar">${brand()}<nav class="top-actions" aria-label="Navigation principale">${signedIn ? `<button class="nav-button ${state.view === "map" ? "active" : ""}" data-action="view" data-view="map">Carte</button><button class="nav-button ${state.view === "messages" ? "active" : ""}" data-action="view" data-view="messages">Messages</button><button class="nav-button ${state.view === "profile" ? "active" : ""}" data-action="view" data-view="profile">Profil</button>${state.user.is_admin ? `<button class="nav-button ${state.view === "admin" ? "active" : ""}" data-action="view" data-view="admin">Admin</button>` : ""}<button class="quick-trigger" data-action="open-quick" aria-label="Actions rapides">C+</button>${locale}` : `${locale}<button class="button" data-action="open-auth">Se connecter</button>`}</nav></header>`;
 }
 function staticBubble(kind, label, position, urgent = false) {
   return `<span class="map-bubble ${kind} ${urgent ? "urgent" : ""}" style="${position}">${escape(label)}</span>`;
 }
 function homeView() {
-  return `<main class="hero"><section><p class="eyebrow">Partout au Maroc</p><h1>Du besoin a la solution.</h1><p class="lead">Un seul compte pour demander une aide, proposer son savoir-faire et parler directement avec la bonne personne.</p><div class="button-row"><button class="button large" data-action="open-auth">Commencer</button><button class="button large secondary" data-action="preview-map">Voir la carte</button></div><p class="proof">Demandes en bleu. Services disponibles en vert. Simple a reconnaitre, simple a utiliser.</p></section><section class="preview-phone" id="preview"><div class="preview-head">Maroc <small>Apercu avant connexion</small></div><div class="map preview-map"><span class="map-label a">Tanger</span><span class="map-label b">Rabat</span><span class="map-label c">Casablanca</span><span class="map-label d">Marrakech</span>${staticBubble("need", "Fuite", "left:42%;top:44%", true)}${staticBubble("help", "Peinture", "left:51%;top:27%")}${staticBubble("need", "Livraison", "left:52%;top:58%")}${staticBubble("help", "Menage", "left:59%;top:74%")}<div class="locked-strip">Connectez-vous pour appuyer sur les bulles</div></div></section></main>`;
+  return `<main id="main-content" class="hero" tabindex="-1"><section class="hero-copy"><p class="eyebrow">Partout au Maroc</p><h1>Un besoin. Une personne proche. Une solution.</h1><p class="lead">Demandez un service ou proposez votre savoir-faire avec le meme compte.</p><div class="button-row"><button class="button large" data-action="open-auth">Commencer</button><button class="button large secondary" data-action="preview-map">Voir l'apercu</button></div><div class="legend hero-legend"><span><i class="dot blue"></i> Demandes</span><span><i class="dot orange"></i> Services</span><span><i class="dot mint"></i> Mise en relation</span></div></section><section class="preview-phone" id="preview" aria-label="Apercu non interactif"><div class="preview-head">ServiceGO <small>Apercu avant connexion</small></div><div class="map preview-map"><span class="map-label a">Tanger</span><span class="map-label b">Rabat</span><span class="map-label c">Casablanca</span><span class="map-label d">Marrakech</span>${staticBubble("need", "Fuite", "left:42%;top:44%", true)}${staticBubble("help", "Peinture", "left:51%;top:27%")}${staticBubble("need", "Livraison", "left:52%;top:58%")}${staticBubble("help", "Menage", "left:59%;top:74%")}<div class="locked-strip">Connectez-vous pour utiliser la carte</div></div></section></main><button class="info-button" data-action="open-info" aria-label="Informations">i</button>`;
 }
 function mapBubbles() {
   const entries = [
@@ -139,6 +167,14 @@ function mapBubbles() {
         `<button class="map-bubble ${item.kind} ${item.urgency === "urgent" ? "urgent" : ""}" style="${pointStyle(item.latitude, item.longitude, item.index)}" data-action="select" data-type="${item.mapType}" data-id="${item.id}" title="${escape(item.label)}">${escape(item.label)}</button>`,
     )
     .join("");
+}
+function accessibleMapList() {
+  const entries = [
+    ...state.map.requests.map((item) => ({ ...item, type: "request", kind: "need" })),
+    ...state.map.services.map((item) => ({ ...item, type: "service", kind: "help" })),
+  ].filter((item) => (state.mapFilter === "all" || state.mapFilter === item.type) && (state.mapCategory === "all" || state.mapCategory === item.category_id));
+  if (!entries.length) return `<p class="page-lead">Aucun resultat avec ces filtres.</p>`;
+  return entries.map((item) => `<button class="map-list-item ${item.kind}" data-action="select" data-type="${item.type}" data-id="${item.id}"><span>${item.kind === "need" ? "?" : "+"}</span><b>${escape(item.title)}</b><small>${escape(item.district)}</small></button>`).join("");
 }
 function mountInteractiveMap() {
   const target = document.querySelector("#liveMap");
@@ -167,7 +203,7 @@ function mountInteractiveMap() {
       type: "service",
       kind: "help",
     })),
-  ];
+  ].filter((entry) => (state.mapFilter === "all" || state.mapFilter === entry.type) && (state.mapCategory === "all" || state.mapCategory === entry.item.category_id));
   for (const entry of entries) {
     const label = escape(entry.item.title).slice(0, 32);
     const icon = Leaflet.divIcon({
@@ -218,10 +254,10 @@ function selectedItem() {
   return `<p class="eyebrow">${request ? "Demande" : "Service disponible"}</p><h2>${escape(item.title)}</h2><span class="badge">${escape(item.category_name || "Service")} - ${escape(item.district)}</span>${photo}<div class="detail-meta"><strong>${escape(identity || "Utilisateur ServiceGO")}</strong><br>${escape(item.description)}${item.budget_hint || item.price_hint ? `<br><br>${request ? "Budget" : "Prix"}: ${escape(item.budget_hint || item.price_hint)}` : ""}</div><div class="detail-actions">${actions}</div>`;
 }
 function mapView() {
-  return `<main class="workspace"><aside class="panel actions-panel"><div><p class="eyebrow">Connecte</p><h2>Que voulez-vous faire ?</h2></div><button class="choice" data-action="open-request"><span class="choice-icon">?</span><span><strong>Demander</strong><small>Publier un besoin</small></span></button><button class="choice green-choice" data-action="open-service"><span class="choice-icon">v</span><span><strong>Proposer</strong><small>Rendre un service visible</small></span></button><div class="legend"><span><i class="dot blue"></i> Besoins</span><span><i class="dot green"></i> Services</span><span><i class="dot orange"></i> Urgent</span></div></aside><section class="panel map-panel"><div class="map-toolbar"><span><strong>Maroc</strong><small>Zoomez, deplacez la carte, appuyez sur une bulle</small></span><button class="button secondary" data-action="open-request">+ Besoin</button></div><div id="liveMap" class="real-map" aria-label="Carte interactive du Maroc"></div></section><aside class="panel selection">${selectedItem()}</aside></main>${mobileTabs()}`;
+  return `<main id="main-content" class="workspace ${state.mapMode === "relief" ? "relief" : ""}" tabindex="-1"><aside class="panel actions-panel"><div><p class="eyebrow">Connecte</p><h2>Que voulez-vous faire ?</h2></div><button class="choice" data-action="open-request"><span class="choice-icon">?</span><span><strong>Demander</strong><small>Publier un besoin</small></span></button><button class="choice green-choice" data-action="open-service"><span class="choice-icon">+</span><span><strong>Proposer</strong><small>Rendre un service visible</small></span></button><div class="legend"><span><i class="dot blue"></i> Demandes</span><span><i class="dot orange"></i> Services</span><span><i class="dot mint"></i> Mise en relation</span></div></aside><section class="panel map-panel"><div class="map-toolbar"><span><strong>Services autour de vous</strong><small>Les positions affichees sont approximatives</small></span><div class="map-controls"><div class="segmented" aria-label="Type de bulle"><button class="${state.mapFilter === "all" ? "active" : ""}" data-action="filter-map" data-value="all">Tout</button><button class="${state.mapFilter === "request" ? "active" : ""}" data-action="filter-map" data-value="request">Demandes</button><button class="${state.mapFilter === "service" ? "active" : ""}" data-action="filter-map" data-value="service">Services</button></div><select data-action="filter-category" aria-label="Categorie"><option value="all">Toutes categories</option>${categoryOptions(state.mapCategory)}</select><div class="segmented" aria-label="Mode de carte"><button class="${state.mapMode === "2d" ? "active" : ""}" data-action="map-mode" data-value="2d">2D</button><button class="${state.mapMode === "relief" ? "active" : ""}" data-action="map-mode" data-value="relief">Relief</button></div></div></div><div id="liveMap" class="real-map" aria-label="Carte interactive du Maroc"></div></section><aside class="panel selection">${selectedItem()}<details class="accessible-list"><summary>Liste accessible</summary>${accessibleMapList()}</details></aside></main>${mobileTabs()}<button class="info-button" data-action="open-info" aria-label="Informations">i</button>`;
 }
 function mobileTabs() {
-  return `<nav class="mobile-tabbar"><button class="${state.view === "map" ? "active" : ""}" data-action="view" data-view="map">Carte</button><button class="${state.view === "messages" ? "active" : ""}" data-action="view" data-view="messages">Messages</button><button class="${state.view === "profile" ? "active" : ""}" data-action="view" data-view="profile">Profil</button></nav>`;
+  return `<nav class="mobile-tabbar" aria-label="Navigation principale"><button class="${state.view === "map" ? "active" : ""}" data-action="view" data-view="map">Carte</button><button class="${state.view === "messages" ? "active" : ""}" data-action="view" data-view="messages">Messages</button><button class="mobile-quick" data-action="open-quick" aria-label="Actions rapides">C+</button><button class="${state.view === "profile" ? "active" : ""}" data-action="view" data-view="profile">Profil</button></nav>`;
 }
 function messagesView() {
   const current = state.conversations.find(
@@ -263,6 +299,10 @@ function profileView() {
     : "";
   return `<main class="view-page"><p class="eyebrow">Profil unique</p><h1>Votre compte ServiceGO</h1><p class="page-lead">Ici, vous etes a la fois libre de demander et de proposer.</p><div class="profile-grid"><section class="panel profile-box profile-main"><div class="avatar">${escape(user.full_name.charAt(0).toUpperCase())}</div><h3>${escape(user.full_name)}</h3><p>${escape(user.email)}<br>${escape(user.district)}</p>${user.email_verified ? `<small>Adresse email confirmee</small>` : `<p><small>Adresse email a confirmer</small><br><button class="text-button" data-action="resend-verification">Renvoyer le lien</button></p>`}<button class="button secondary" style="margin-top:16px" data-action="open-profile">Modifier</button></section><section class="panel profile-box"><h3>Mes besoins</h3><ul class="profile-list">${requestItems}</ul></section><section class="panel profile-box"><h3>Mes services</h3><ul class="profile-list">${serviceItems}</ul></section><section class="panel profile-box"><h3>Confiance</h3><p>${Number(user.rating || 5).toFixed(1)} / 5<br>${user.review_count || 0} avis</p></section>${admin}</div></main>${mobileTabs()}`;
 }
+function adminView() {
+  const stats = state.adminStats || {};
+  return `<main id="main-content" class="view-page" tabindex="-1"><p class="eyebrow">Administration</p><h1>Tableau de bord</h1><p class="page-lead">Vue reservee aux administrateurs ServiceGO.</p><div class="stats-grid"><section class="panel"><strong>${Number(stats.users || 0)}</strong><span>Utilisateurs</span></section><section class="panel"><strong>${Number(stats.open_requests || 0)}</strong><span>Demandes ouvertes</span></section><section class="panel"><strong>${Number(stats.active_services || 0)}</strong><span>Services actifs</span></section><section class="panel"><strong>${Number(stats.conversations || 0)}</strong><span>Conversations</span></section></div></main>${mobileTabs()}<button class="info-button" data-action="open-info" aria-label="Informations">i</button>`;
+}
 function authModal() {
   const register = state.authMode === "register";
   return `<div class="modal-layer"><section class="modal"><button class="button icon outline close" data-action="close-modal" aria-label="Fermer">x</button><p class="eyebrow">ServiceGO Maroc</p><h2>${register ? "Creez votre compte" : "Bon retour"}</h2><div class="modal-tabs"><button class="${!register ? "active" : ""}" data-action="auth-tab" data-mode="login">Se connecter</button><button class="${register ? "active" : ""}" data-action="auth-tab" data-mode="register">Creer un compte</button></div><form class="form-grid" data-form="auth">${register ? `<label class="field full"><span>Prenom et nom</span><input name="full_name" minlength="2" maxlength="80" required /></label><label class="field"><span>Telephone</span><input name="phone" maxlength="30" inputmode="tel" /></label><label class="field"><span>Ville</span><select name="district">${cityOptions()}</select></label>` : ""}<label class="field full"><span>Email</span><input name="email" type="email" autocomplete="email" required /></label><label class="field full"><span>Mot de passe</span><input name="password" type="password" autocomplete="${register ? "new-password" : "current-password"}" minlength="8" required /></label><button class="button submit" type="submit">${register ? "Creer mon compte" : "Se connecter"}</button></form><p class="form-note">Un seul compte suffit pour demander et proposer, partout au Maroc.</p></section></div>`;
@@ -290,6 +330,12 @@ function offersModal() {
   const offers = state.offers.items;
   return `<div class="modal-layer"><section class="modal"><button class="button icon outline close" data-action="close-modal" aria-label="Fermer">x</button><p class="eyebrow">Reponses recues</p><h2>${escape(request?.title || "Votre demande")}</h2>${offers.length ? `<div class="offers-list">${offers.map((offer) => `<article class="offer"><strong>${escape(offer.full_name)}</strong><small>${Number(offer.rating || 5).toFixed(1)} / 5 - ${offer.review_count || 0} avis</small><p>${escape(offer.message)}</p>${offer.price_hint ? `<b>${escape(offer.price_hint)}</b>` : ""}${offer.status === "pending" ? `<button class="button" data-action="accept-offer" data-id="${offer.id}">Accepter cette reponse</button>` : `<span class="offer-status">${escape(offer.status)}</span>`}</article>`).join("")}</div>` : `<p class="page-lead">Pas encore de reponse. Votre bulle est toujours visible sur la carte.</p>`}</section></div>`;
 }
+function quickModal() {
+  return `<div class="modal-layer"><section class="modal quick-modal"><button class="button icon outline close" data-action="close-modal" aria-label="Fermer">x</button><p class="eyebrow">Action rapide</p><h2>Que voulez-vous faire ?</h2><div class="quick-grid"><button class="choice" data-action="open-request"><span class="choice-icon">?</span><span><strong>Demander</strong><small>Publier un besoin</small></span></button><button class="choice green-choice" data-action="open-service"><span class="choice-icon">+</span><span><strong>Proposer</strong><small>Rendre un service visible</small></span></button></div><button class="button outline logout-wide" data-action="logout">Se deconnecter</button></section></div>`;
+}
+function infoModal() {
+  return `<div class="modal-layer"><section class="modal"><button class="button icon outline close" data-action="close-modal" aria-label="Fermer">x</button><p class="eyebrow">ServiceGO</p><h2>A propos</h2><p class="page-lead">Une place locale pour demander, proposer et entrer en contact simplement. Les positions publiques restent approximatives.</p><div class="legend"><span><i class="dot blue"></i> Demandes</span><span><i class="dot orange"></i> Services</span><span><i class="dot mint"></i> Mise en relation</span></div><p class="form-note">Service commercial en phase de lancement. Ne partagez jamais de mot de passe ni de code de verification.</p></section></div>`;
+}
 function modal() {
   if (!state.modal) return "";
   if (state.modal === "auth") return authModal();
@@ -299,6 +345,8 @@ function modal() {
   if (state.modal === "direct") return directModal();
   if (state.modal === "profile") return profileModal();
   if (state.modal === "offers") return offersModal();
+  if (state.modal === "quick") return quickModal();
+  if (state.modal === "info") return infoModal();
   return "";
 }
 function render() {
@@ -309,8 +357,22 @@ function render() {
         ? messagesView()
         : state.view === "profile"
           ? profileView()
+          : state.view === "admin"
+            ? adminView()
           : mapView();
   app.innerHTML = `<div class="app">${header()}${view}${modal()}</div>`;
+  document.documentElement.lang = state.locale;
+  document.documentElement.dir = state.locale === "ar" ? "rtl" : "ltr";
+  document.title = `ServiceGO | ${state.view === "home" ? "Du besoin a la solution" : state.view}`;
+  const dialog = document.querySelector(".modal");
+  if (dialog) {
+    dialog.setAttribute("role", "dialog");
+    dialog.setAttribute("aria-modal", "true");
+    const title = dialog.querySelector("h2");
+    if (title) { title.id = "dialog-title"; dialog.setAttribute("aria-labelledby", title.id); }
+    requestAnimationFrame(() => dialog.querySelector("input, select, textarea, button")?.focus());
+  }
+  localizeDom();
   if (state.user && state.view === "map") mountInteractiveMap();
 }
 async function loadMap() {
@@ -381,6 +443,14 @@ app.addEventListener("click", async (event) => {
       state.modal = "auth";
       render();
     }
+    if (action === "open-quick") {
+      state.modal = "quick";
+      render();
+    }
+    if (action === "open-info") {
+      state.modal = "info";
+      render();
+    }
     if (action === "close-modal") {
       state.modal = null;
       render();
@@ -442,6 +512,17 @@ app.addEventListener("click", async (event) => {
         if (state.user.is_admin)
           state.adminStats = (await api("/api/admin/overview")).stats;
       }
+      if (state.view === "admin" && state.user.is_admin)
+        state.adminStats = (await api("/api/admin/overview")).stats;
+      render();
+    }
+    if (action === "filter-map") {
+      state.mapFilter = button.dataset.value;
+      state.selected = null;
+      render();
+    }
+    if (action === "map-mode") {
+      state.mapMode = button.dataset.value;
       render();
     }
     if (action === "select") {
@@ -474,6 +555,34 @@ app.addEventListener("click", async (event) => {
   } catch (error) {
     notify(error.message, true);
   }
+});
+app.addEventListener("change", (event) => {
+  const target = event.target;
+  if (target.matches('[data-action="locale"]')) {
+    state.locale = target.value;
+    localStorage.setItem("servicego-locale", state.locale);
+    render();
+  }
+  if (target.matches('[data-action="filter-category"]')) {
+    state.mapCategory = target.value;
+    state.selected = null;
+    render();
+  }
+});
+document.addEventListener("keydown", (event) => {
+  if (event.key === "Escape" && state.modal) {
+    state.modal = null;
+    render();
+    return;
+  }
+  if (event.key !== "Tab" || !state.modal) return;
+  const dialog = document.querySelector('[role="dialog"]');
+  if (!dialog) return;
+  const controls = [...dialog.querySelectorAll('button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), a[href]')];
+  const first = controls[0];
+  const last = controls.at(-1);
+  if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last?.focus(); }
+  if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first?.focus(); }
 });
 app.addEventListener("submit", async (event) => {
   const form = event.target;
