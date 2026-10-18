@@ -1,5 +1,9 @@
 import * as Leaflet from "/vendor/leaflet/leaflet-src.esm.js";
+import { preloadPhotoSet, selectPhotoSet } from "/photo-catalog.js";
 const app = document.querySelector("#app");
+const savedLocale = localStorage.getItem("servicego-locale");
+const browserLocale = (navigator.languages?.[0] || navigator.language || "fr").toLowerCase();
+const initialLocale = savedLocale || (browserLocale.startsWith("ar") ? "ar" : browserLocale.startsWith("en") ? "en" : "fr");
 const state = {
   user: null,
   categories: [],
@@ -19,13 +23,19 @@ const state = {
   mine: { requests: [], services: [] },
   offers: { request: null, items: [] },
   adminStats: null,
-  locale: localStorage.getItem("servicego-locale") || "fr",
+  locale: initialLocale,
   mapFilter: "all",
   mapCategory: "all",
   mapMode: "2d",
   publicMenuOpen: false,
+  legalTab: 0,
+  geo: { country: "", region: "", city: "", source: "fallback" },
+  publicPhotos: [],
+  passwordVisible: false,
 };
 let leafletMap = null;
+let marketingMap = null;
+let modalReturnAction = null;
 const cities = {
   Casablanca: [33.5731, -7.5898],
   Rabat: [34.0209, -6.8416],
@@ -64,7 +74,11 @@ Object.assign(uiTranslations.en, {
   "Proposez vos services et soyez rémunéré.": "Offer your services and get paid.",
   "L'entraide commence ici.": "Helping each other starts here.", "Rejoindre ServiceGO": "Join ServiceGO",
   "Accueil": "Home", "Connexion": "Sign in", "Plus": "More", "Informations legales": "Legal information", "Contact": "Contact",
-  "Questions frequentes": "Frequently asked questions", "Retour en haut": "Back to top"
+  "Questions frequentes": "Frequently asked questions", "Retour en haut": "Back to top",
+  "Fuite": "Leak repair", "Peinture": "Painting", "Livraison": "Delivery", "Menage": "Cleaning",
+  "Prenom": "First name", "Nom": "Last name", "Mot de passe oublié ?": "Forgot password?",
+  "Afficher le mot de passe": "Show password", "Masquer le mot de passe": "Hide password",
+  "Nous ecrire": "Email us", "Envoyer le lien": "Send link", "Retour a la connexion": "Back to sign in"
 });
 Object.assign(uiTranslations.ar, {
   "Un besoin.": "حاجة واحدة.", "Une personne.": "شخص واحد.", "Une solution.": "حل واحد.",
@@ -73,7 +87,11 @@ Object.assign(uiTranslations.ar, {
   "Proposez vos services et soyez rémunéré.": "اعرض خدماتك واحصل على مقابل.",
   "L'entraide commence ici.": "التعاون يبدأ هنا.", "Rejoindre ServiceGO": "انضم إلى ServiceGO",
   "Accueil": "الرئيسية", "Connexion": "تسجيل الدخول", "Plus": "المزيد", "Informations legales": "المعلومات القانونية", "Contact": "اتصل بنا",
-  "Questions frequentes": "الأسئلة الشائعة", "Retour en haut": "العودة إلى الأعلى"
+  "Questions frequentes": "الأسئلة الشائعة", "Retour en haut": "العودة إلى الأعلى",
+  "Fuite": "إصلاح تسرب", "Peinture": "صباغة", "Livraison": "توصيل", "Menage": "تنظيف",
+  "Prenom": "الاسم الأول", "Nom": "اسم العائلة", "Mot de passe oublié ?": "هل نسيت كلمة المرور؟",
+  "Afficher le mot de passe": "إظهار كلمة المرور", "Masquer le mot de passe": "إخفاء كلمة المرور",
+  "Nous ecrire": "راسلنا", "Envoyer le lien": "إرسال الرابط", "Retour a la connexion": "العودة إلى تسجيل الدخول"
 });
 function localizeDom() {
   if (state.locale === "fr") return;
@@ -159,15 +177,21 @@ function brand() {
 function header() {
   const signedIn = Boolean(state.user);
   const locale = `<label class="sr-only" for="locale">Langue</label><select id="locale" class="locale-select" data-action="locale" aria-label="Langue"><option value="fr" ${state.locale === "fr" ? "selected" : ""}>FR</option><option value="en" ${state.locale === "en" ? "selected" : ""}>EN</option><option value="ar" ${state.locale === "ar" ? "selected" : ""}>AR</option></select>`;
-  if (!signedIn) return `<header class="public-nucleus"><nav aria-label="Navigation principale"><button class="nucleus-icon" data-action="home" aria-label="Accueil" data-label="Accueil">⌂</button><button class="nucleus-icon" data-action="open-auth" aria-label="Connexion" data-label="Connexion">↗</button><button class="nucleus-icon plus ${state.publicMenuOpen ? "active" : ""}" data-action="toggle-public-menu" aria-label="Plus" aria-expanded="${state.publicMenuOpen}" data-label="Plus">+</button>${state.publicMenuOpen ? `<div class="nucleus-more"><label class="sr-only" for="locale">Langue</label>${locale}<button data-action="open-faq">FAQ</button><button data-action="open-legal">Informations legales</button><button data-action="open-legal">Contact</button></div>` : ""}</nav></header>`;
+  if (!signedIn) return `<header class="public-nucleus ${state.publicMenuOpen ? "is-expanded" : ""}"><nav aria-label="Navigation principale"><button class="nucleus-icon" data-action="home" aria-label="Accueil" data-label="Accueil"><span aria-hidden="true">⌂</span></button><button class="nucleus-icon profile-icon" data-action="open-auth" aria-label="Connexion" data-label="Connexion"><span class="profile-glyph" aria-hidden="true"></span></button><span class="nucleus-secondary" aria-hidden="${!state.publicMenuOpen}"><button class="nucleus-icon language-icon" data-action="cycle-locale" aria-label="Langue" data-label="Langue" tabindex="${state.publicMenuOpen ? "0" : "-1"}">A/文</button><button class="nucleus-icon" data-action="open-faq" aria-label="Questions frequentes" data-label="Questions frequentes" tabindex="${state.publicMenuOpen ? "0" : "-1"}">?</button><button class="nucleus-icon" data-action="open-legal" aria-label="Informations legales" data-label="Informations legales" tabindex="${state.publicMenuOpen ? "0" : "-1"}">▤</button><button class="nucleus-icon" data-action="open-contact" aria-label="Contact" data-label="Contact" tabindex="${state.publicMenuOpen ? "0" : "-1"}">✉</button></span><button class="nucleus-icon plus ${state.publicMenuOpen ? "active" : ""}" data-action="toggle-public-menu" aria-label="${state.publicMenuOpen ? "Fermer" : "Plus"}" aria-expanded="${state.publicMenuOpen}" data-label="${state.publicMenuOpen ? "Fermer" : "Plus"}">${state.publicMenuOpen ? "−" : "+"}</button></nav></header>`;
   return `<header class="topbar member-nucleus">${brand()}<nav class="top-actions" aria-label="Navigation principale"><button class="nav-button ${state.view === "map" ? "active" : ""}" data-action="view" data-view="map">Carte</button><button class="nav-button ${state.view === "messages" ? "active" : ""}" data-action="view" data-view="messages">Messages</button><button class="nav-button ${state.view === "profile" ? "active" : ""}" data-action="view" data-view="profile">Profil</button>${state.user.is_admin ? `<button class="nav-button ${state.view === "admin" ? "active" : ""}" data-action="view" data-view="admin">Admin</button>` : ""}<button class="quick-trigger" data-action="open-quick" aria-label="Actions rapides">C+</button>${locale}</nav></header>`;
 }
 function staticBubble(kind, label, position, urgent = false) {
   return `<span class="map-bubble ${kind} ${urgent ? "urgent" : ""}" style="${position}">${escape(label)}</span>`;
 }
 function homeView() {
+  const photos = state.publicPhotos.length ? state.publicPhotos : selectPhotoSet(state.geo.country);
+  state.publicPhotos = photos;
+  const first = photos[0];
+  const second = photos[1] || photos[0];
+  const alt = (photo) => escape(photo.alt[state.locale] || photo.alt.fr);
+  const credit = [...new Set(photos.map((photo) => photo.credit))].join(" · ");
   const characters = `<div class="character-stage" aria-label="Les deux personnages ServiceGO se rencontrent"><span class="character blue-character" aria-hidden="true"></span><span class="meeting-light" aria-hidden="true"></span><span class="character green-character" aria-hidden="true"></span></div>`;
-  return `<div class="visitor-brand">${brand()}</div><main id="main-content" class="story" tabindex="-1"><section class="story-scene discovery" data-story-scene><div class="ambient-layer"></div><div class="discovery-copy"><h1><span>Un besoin.</span><span>Une personne.</span><span>Une solution.</span></h1><button class="discover-action" data-action="discover">Découvrir <span aria-hidden="true">↓</span></button></div><section class="preview-phone" aria-label="Apercu fictif de ServiceGO"><div class="preview-head">ServiceGO</div><div class="map preview-map"><span class="map-label a">Tanger</span><span class="map-label b">Rabat</span><span class="map-label c">Casablanca</span><span class="map-label d">Marrakech</span>${staticBubble("need", "Fuite", "left:42%;top:44%", true)}${staticBubble("help", "Peinture", "left:51%;top:27%")}${staticBubble("need", "Livraison", "left:52%;top:58%")}${staticBubble("help", "Menage", "left:59%;top:74%")}</div></section></section><section id="possibilities" class="story-scene possibilities" data-story-scene><div class="story-content"><h2>Deux possibilités. Un seul compte.</h2>${characters}<div class="possibility-actions"><button class="possibility need" data-action="open-auth"><span>Je demande</span><small>Trouvez une personne proche.</small></button><button class="possibility offer" data-action="open-auth"><span>Je propose</span><small>Proposez vos services et soyez rémunéré.</small></button></div></div></section><section class="story-scene conclusion" data-story-scene><div class="story-content">${characters}<h2>L'entraide commence ici.</h2><button class="button large join" data-action="open-auth">Rejoindre ServiceGO</button><p class="photo-credit">Photos: Souhail BIDA et Calin Stan, Unsplash</p></div></section></main><button class="back-to-top" data-action="back-top" aria-label="Retour en haut">↑</button>`;
+  return `<main id="main-content" class="story-v21" tabindex="-1" style="--photo-one:url('${first.resolutions.large}');--photo-two:url('${second.resolutions.large}')"><div class="story-scroll" aria-hidden="true"><span id="moment-one"></span><span id="possibilities"></span><span id="moment-three"></span></div><div class="story-viewport"><div class="story-photo photo-one" role="img" aria-label="${alt(first)}"></div><div class="story-photo photo-two" role="img" aria-label="${alt(second)}"></div><div class="story-light" aria-hidden="true"></div><section class="narrative moment-one" aria-labelledby="story-title"><div class="discovery-copy"><h1 id="story-title"><span>Un besoin.</span><span>Une personne.</span><span>Une solution.</span></h1></div><div class="device-perspective"><div class="smartphone" aria-label="Apercu fictif de ServiceGO"><div class="phone-frame"><div class="phone-speaker" aria-hidden="true"></div><div class="phone-screen"><div class="phone-status" aria-hidden="true"><span>9:41</span><span>● ● ▰</span></div><div id="marketing-map" class="marketing-map" aria-label="Carte geographique fictive"><div class="marketing-pins">${staticBubble("need", "Fuite", "left:38%;top:42%", true)}${staticBubble("help", "Peinture", "left:62%;top:28%")}${staticBubble("need", "Livraison", "left:58%;top:62%")}${staticBubble("help", "Menage", "left:34%;top:73%")}</div></div></div><span class="phone-reflection" aria-hidden="true"></span></div></div></div><button class="discover-arrow" data-action="discover" aria-label="Découvrir"><span aria-hidden="true">↓</span></button></section><section class="narrative moment-two" aria-labelledby="possibility-title"><div class="story-content"><h2 id="possibility-title">Deux possibilités. Un seul compte.</h2>${characters}<div class="possibility-actions"><button class="possibility need" data-action="open-auth" data-intent="request"><span>Je demande</span></button><button class="possibility offer" data-action="open-auth" data-intent="offer"><span>Je propose</span></button></div></div></section><section class="narrative moment-three" aria-labelledby="conclusion-title"><div class="story-content">${characters}<h2 id="conclusion-title">L'entraide commence ici.</h2><button class="button large join" data-action="open-auth">Rejoindre ServiceGO</button><p class="photo-credit">Photos: ${escape(credit)} · Unsplash</p></div></section></div></main><button class="back-to-top" data-action="back-top" aria-label="Retour en haut">↑</button>`;
 }
 function mapBubbles() {
   const entries = [
@@ -332,7 +356,11 @@ function adminView() {
 }
 function authModal() {
   const register = state.authMode === "register";
-  return `<div class="modal-layer"><section class="modal"><button class="button icon outline close" data-action="close-modal" aria-label="Fermer">x</button><p class="eyebrow">ServiceGO Maroc</p><h2>${register ? "Creez votre compte" : "Bon retour"}</h2><div class="modal-tabs"><button class="${!register ? "active" : ""}" data-action="auth-tab" data-mode="login">Se connecter</button><button class="${register ? "active" : ""}" data-action="auth-tab" data-mode="register">Creer un compte</button></div><form class="form-grid" data-form="auth">${register ? `<label class="field full"><span>Prenom et nom</span><input name="full_name" minlength="2" maxlength="80" required /></label><label class="field"><span>Telephone</span><input name="phone" maxlength="30" inputmode="tel" /></label><label class="field"><span>Ville</span><select name="district">${cityOptions()}</select></label>` : ""}<label class="field full"><span>Email</span><input name="email" type="email" autocomplete="email" required /></label><label class="field full"><span>Mot de passe</span><input name="password" type="password" autocomplete="${register ? "new-password" : "current-password"}" minlength="8" required /></label><button class="button submit" type="submit">${register ? "Creer mon compte" : "Se connecter"}</button></form><p class="form-note">Un seul compte suffit pour demander et proposer, partout au Maroc.</p></section></div>`;
+  const forgot = state.authMode === "forgot";
+  const country = state.geo.country || "MA";
+  const codes = [["MA","+212"],["FR","+33"],["ES","+34"],["GB","+44"],["US","+1"],["DE","+49"],["AE","+971"],["IN","+91"]];
+  if (forgot) return `<div class="modal-layer"><section class="modal public-modal auth-modal"><button class="button icon outline close" data-action="close-modal" aria-label="Fermer">×</button><p class="eyebrow">ServiceGO</p><h2>Mot de passe oublié ?</h2><p class="modal-intro">Indiquez l'adresse utilisee pour votre compte.</p><form class="form-grid" data-form="forgot"><label class="field full"><span>Email</span><input name="email" type="email" autocomplete="email" required /></label><button class="button submit" type="submit">Envoyer le lien</button></form><button class="text-button auth-back" data-action="auth-tab" data-mode="login">Retour a la connexion</button></section></div>`;
+  return `<div class="modal-layer"><section class="modal public-modal auth-modal"><button class="button icon outline close" data-action="close-modal" aria-label="Fermer">×</button><p class="eyebrow">ServiceGO</p><h2>${register ? "Creez votre compte" : "Bon retour"}</h2><div class="modal-tabs"><button class="${!register ? "active" : ""}" data-action="auth-tab" data-mode="login">Se connecter</button><button class="${register ? "active" : ""}" data-action="auth-tab" data-mode="register">Creer un compte</button></div><form class="form-grid" data-form="auth">${register ? `<label class="field"><span>Prenom</span><input name="first_name" autocomplete="given-name" minlength="1" maxlength="40" required /></label><label class="field"><span>Nom</span><input name="last_name" autocomplete="family-name" minlength="1" maxlength="40" required /></label>` : ""}<label class="field full"><span>Email</span><input name="email" type="email" autocomplete="email" required /></label>${register ? `<div class="phone-field full"><label class="field dial-code"><span>Indicatif</span><select name="dial_code" aria-label="Indicatif international">${codes.map(([iso,code])=>`<option value="${code}" ${iso===country?"selected":""}>${iso} ${code}</option>`).join("")}</select></label><label class="field phone-number"><span>Telephone</span><input name="phone_number" maxlength="24" inputmode="tel" autocomplete="tel-national" placeholder="6 12 34 56 78" required /></label></div>` : ""}<label class="field full password-field"><span>Mot de passe</span><span class="password-input"><input name="password" type="${state.passwordVisible ? "text" : "password"}" autocomplete="${register ? "new-password" : "current-password"}" minlength="8" required /><button type="button" data-action="toggle-password" aria-label="${state.passwordVisible ? "Masquer le mot de passe" : "Afficher le mot de passe"}">${state.passwordVisible ? "◉" : "○"}</button></span></label>${!register ? `<button type="button" class="text-button forgot-link" data-action="auth-tab" data-mode="forgot">Mot de passe oublié ?</button>` : ""}<button class="button submit" type="submit">${register ? "Creer mon compte" : "Se connecter"}</button></form><p class="form-note">Un seul compte pour demander un service et proposer votre aide.</p></section></div>`;
 }
 function requestModal() {
   return `<div class="modal-layer"><section class="modal"><button class="button icon outline close" data-action="close-modal" aria-label="Fermer">x</button><p class="eyebrow">Demander</p><h2>Quel besoin avez-vous ?</h2><form class="form-grid" data-form="request"><label class="field"><span>Service</span><select name="category_id" required>${categoryOptions()}</select></label><label class="field"><span>Ville</span><select name="district">${cityOptions()}</select></label><label class="field full"><span>Titre court</span><input name="title" maxlength="100" placeholder="Ex: Fuite sous evier" required /></label><label class="field full"><span>Expliquez simplement</span><textarea name="description" maxlength="1200" placeholder="Ce qui doit etre fait, et quand." required></textarea></label><label class="field"><span>Budget (optionnel)</span><input name="budget_hint" maxlength="80" placeholder="Ex: 150 - 250 DH" /></label><label class="field"><span>Urgence</span><select name="urgency"><option value="normal">Normale</option><option value="urgent">Urgent</option></select></label><label class="field full"><span>Photo (optionnelle)</span><input type="file" name="photo" accept="image/*" /></label><button class="button submit" type="submit">Publier sur la carte</button></form></section></div>`;
@@ -365,11 +393,11 @@ function infoModal() {
 }
 function faqModal() {
   const copy = {
-    fr: { title:"Questions frequentes", items:[["Un compte peut-il demander et proposer ?","Oui. Chaque membre peut publier une demande et proposer ses propres services avec le meme compte."],["La position affichee est-elle exacte ?","Non. La carte des membres affiche une zone approximative afin de proteger la localisation precise."],["Un service doit-il etre payant ?","Non. Un service peut etre gratuit ou remunere selon l'accord entre les personnes."],["Comment contacter une personne ?","Choisissez une annonce, envoyez une reponse ou une demande directe, puis utilisez la conversation ServiceGO."]] },
-    en: { title:"Frequently asked questions", items:[["Can one account request and offer services?","Yes. Every member can post a request and offer services with the same account."],["Is the displayed location exact?","No. The member map displays an approximate area to protect the precise location."],["Must a service be paid?","No. A service can be free or paid according to the agreement between people."],["How do I contact someone?","Choose a listing, send a reply or a direct request, then use the ServiceGO conversation."]] },
-    ar: { title:"الأسئلة الشائعة", items:[["هل يمكن للحساب نفسه الطلب والعرض؟","نعم. يمكن لكل عضو نشر طلب وعرض خدماته بالحساب نفسه."],["هل الموقع المعروض دقيق؟","لا. تعرض خريطة الأعضاء منطقة تقريبية لحماية الموقع الدقيق."],["هل يجب أن تكون الخدمة مدفوعة؟","لا. يمكن أن تكون الخدمة مجانية أو مدفوعة حسب الاتفاق بين الأشخاص."],["كيف أتواصل مع شخص؟","اختر إعلانا وأرسل ردا أو طلبا مباشرا ثم استخدم محادثة ServiceGO."]] }
+    fr: { title:"Questions frequentes", items:[["Qu'est-ce que ServiceGO ?","Une plateforme qui met en relation des personnes ayant un besoin avec celles qui peuvent aider."],["Un compte peut-il demander et proposer ?","Oui. Le meme compte permet de publier des demandes et de proposer des services."],["Les services peuvent-ils etre gratuits ?","Oui. Les personnes choisissent ensemble si le service est gratuit ou remunere."],["Comment publier une demande ?","Connectez-vous, choisissez Je demande, puis decrivez votre besoin avant de le publier."],["Comment proposer mon aide ?","Connectez-vous, choisissez Je propose et indiquez clairement le service disponible."],["Comment contacter une personne ?","Selectionnez une annonce et envoyez une reponse ou une demande directe pour ouvrir une conversation."],["Ma localisation exacte est-elle visible ?","Non. La carte membre affiche une position volontairement approximative."],["Comment signaler un probleme ?","Ecrivez a aetbconseil@gmail.com en indiquant le compte ou l'annonce concernee."]] },
+    en: { title:"Frequently asked questions", items:[["What is ServiceGO?","A platform connecting people who need something with people who can help."],["Can one account request and offer services?","Yes. The same account can post requests and offer services."],["Can services be free?","Yes. People agree together whether a service is free or paid."],["How do I post a request?","Sign in, choose I request, describe your need and publish it."],["How do I offer help?","Sign in, choose I offer and clearly describe the available service."],["How do I contact someone?","Select a listing and send a reply or direct request to open a conversation."],["Is my exact location visible?","No. The member map deliberately displays an approximate position."],["How do I report a problem?","Email aetbconseil@gmail.com and identify the account or listing concerned."]] },
+    ar: { title:"الأسئلة الشائعة", items:[["ما هي ServiceGO؟","منصة تربط بين من يحتاج إلى خدمة ومن يستطيع تقديم المساعدة."],["هل يمكن للحساب نفسه الطلب والعرض؟","نعم. يتيح الحساب نفسه نشر الطلبات وعرض الخدمات."],["هل يمكن أن تكون الخدمات مجانية؟","نعم. يتفق الأشخاص معا على ما إذا كانت الخدمة مجانية أو مدفوعة."],["كيف أنشر طلبا؟","سجل الدخول واختر أطلب ثم صف حاجتك وانشرها."],["كيف أعرض مساعدتي؟","سجل الدخول واختر أعرض ثم صف الخدمة المتاحة بوضوح."],["كيف أتواصل مع شخص؟","اختر إعلانا وأرسل ردا أو طلبا مباشرا لفتح محادثة."],["هل موقعي الدقيق ظاهر؟","لا. تعرض خريطة الأعضاء موقعا تقريبيا عن قصد."],["كيف أبلغ عن مشكلة؟","راسل aetbconseil@gmail.com وحدد الحساب أو الإعلان المعني."]] }
   }[state.locale] || null;
-  return `<div class="modal-layer"><section class="modal public-info-modal"><button class="button icon outline close" data-action="close-modal" aria-label="Fermer">x</button><p class="eyebrow">ServiceGO</p><h2>${copy.title}</h2>${copy.items.map(([question,answer],index)=>`<details ${index===0?"open":""}><summary>${question}</summary><p>${answer}</p></details>`).join("")}</section></div>`;
+  return `<div class="modal-layer"><section class="modal public-modal public-info-modal"><button class="button icon outline close" data-action="close-modal" aria-label="Fermer">×</button><p class="eyebrow">ServiceGO</p><h2>${copy.title}</h2><div class="faq-list">${copy.items.map(([question,answer],index)=>`<details ${index===0?"open":""}><summary>${question}</summary><p>${answer}</p></details>`).join("")}</div></section></div>`;
 }
 function legalModal() {
   const copy = {
@@ -377,8 +405,16 @@ function legalModal() {
     en: { eyebrow:"Public information",title:"Legal and privacy framework",labels:["Legal notice","Terms of use","Privacy","Cookies","Services","Contact"],texts:["Publisher, registered office and registration number: information to be completed by the project owner.","The contractual version must be approved and published before full commercial launch.","ServiceGO limits the operational map to members and displays approximate locations. The complete policy still requires approval.","The session uses an HTTPOnly cookie required for sign-in. Additional information must be added if other tools are introduced.","ServiceGO connects people requesting or offering a service. Detailed commercial terms still require approval.","Public contact details: to be completed by the project owner."] },
     ar: { eyebrow:"معلومات عامة",title:"الإطار القانوني والخصوصية",labels:["الإشعار القانوني","شروط الاستخدام","الخصوصية","ملفات الارتباط","الخدمات","اتصل بنا"],texts:["الناشر وعنوان المقر ورقم التسجيل: معلومات يجب على مالك المشروع استكمالها.","يجب اعتماد النسخة التعاقدية ونشرها قبل الإطلاق التجاري الكامل.","تقصر ServiceGO الخريطة التشغيلية على الأعضاء وتعرض مواقع تقريبية. لا تزال السياسة الكاملة بحاجة إلى الاعتماد.","تستخدم الجلسة ملف ارتباط HTTPOnly ضروريا لتسجيل الدخول. يجب إضافة معلومات أخرى إذا أضيفت أدوات جديدة.","تربط ServiceGO بين الأشخاص الذين يطلبون خدمة أو يعرضونها. لا تزال الشروط التجارية التفصيلية بحاجة إلى الاعتماد.","بيانات الاتصال العامة: يجب على مالك المشروع استكمالها."] }
   }[state.locale] || null;
-  const ids=["legal-notice","terms","privacy","cookies","service-info","contact"];
-  return `<div class="modal-layer"><section class="modal public-info-modal legal-modal"><button class="button icon outline close" data-action="close-modal" aria-label="Fermer">x</button><p class="eyebrow">${copy.eyebrow}</p><h2>${copy.title}</h2><nav class="legal-nav" aria-label="Rubriques legales">${copy.labels.map((label,index)=>`<a href="#${ids[index]}">${label}</a>`).join("")}</nav><div class="legal-sections">${copy.labels.map((label,index)=>`<section id="${ids[index]}"><h3>${label}</h3><p>${copy.texts[index]}</p></section>`).join("")}</div></section></div>`;
+  const active = Math.max(0, Math.min(copy.labels.length - 1, state.legalTab));
+  return `<div class="modal-layer"><section class="modal public-modal public-info-modal legal-modal"><button class="button icon outline close" data-action="close-modal" aria-label="Fermer">×</button><p class="eyebrow">${copy.eyebrow}</p><h2>${copy.title}</h2><nav class="legal-nav" aria-label="Rubriques legales">${copy.labels.map((label,index)=>`<button class="${index===active?"active":""}" data-action="legal-tab" data-index="${index}" aria-current="${index===active?"page":"false"}">${label}</button>`).join("")}</nav><div class="legal-content" aria-live="polite"><h3>${copy.labels[active]}</h3><p>${copy.texts[active]}</p></div></section></div>`;
+}
+function contactModal() {
+  const copy = {
+    fr: ["Nous contacter", "Une question, un signalement ou une demande concernant ServiceGO ?", "Nous ecrire"],
+    en: ["Contact us", "A question, report or request about ServiceGO?", "Email us"],
+    ar: ["اتصل بنا", "هل لديك سؤال أو بلاغ أو طلب بخصوص ServiceGO؟", "راسلنا"],
+  }[state.locale];
+  return `<div class="modal-layer"><section class="modal public-modal contact-modal"><button class="button icon outline close" data-action="close-modal" aria-label="Fermer">×</button><p class="eyebrow">ServiceGO</p><h2>${copy[0]}</h2><p class="modal-intro">${copy[1]}</p><a class="contact-email" href="mailto:aetbconseil@gmail.com">aetbconseil@gmail.com</a><a class="button contact-action" href="mailto:aetbconseil@gmail.com?subject=ServiceGO">${copy[2]}</a></section></div>`;
 }
 function modal() {
   if (!state.modal) return "";
@@ -393,6 +429,7 @@ function modal() {
   if (state.modal === "info") return infoModal();
   if (state.modal === "faq") return faqModal();
   if (state.modal === "legal") return legalModal();
+  if (state.modal === "contact") return contactModal();
   return "";
 }
 function render() {
@@ -410,6 +447,7 @@ function render() {
   document.documentElement.lang = state.locale;
   document.documentElement.dir = state.locale === "ar" ? "rtl" : "ltr";
   document.body.dataset.space = state.user && state.view !== "home" ? "member" : "visitor";
+  document.body.classList.toggle("modal-open", Boolean(state.modal));
   document.title = `ServiceGO | ${state.view === "home" ? "Du besoin a la solution" : state.view}`;
   const dialog = document.querySelector(".modal");
   if (dialog) {
@@ -424,19 +462,47 @@ function render() {
   if (!state.user || state.view === "home") initializeStory();
 }
 function initializeStory() {
-  const scenes = document.querySelectorAll("[data-story-scene]");
-  const observer = new IntersectionObserver((entries) => {
-    entries.forEach((entry) => entry.target.classList.toggle("is-visible", entry.isIntersecting));
-  }, { threshold: 0.28 });
-  scenes.forEach((scene) => observer.observe(scene));
+  if (marketingMap) marketingMap.remove();
+  const mapElement = document.querySelector("#marketing-map");
+  if (mapElement) {
+    const centers = { MA: [33.4, -7.1, 5], FR: [46.4, 2.2, 5], ES: [40.2, -3.5, 5] };
+    const [lat, lng, zoom] = centers[state.geo.country] || [31, 4, 2];
+    marketingMap = Leaflet.map(mapElement, { center: [lat, lng], zoom, zoomControl: false, attributionControl: false, dragging: false, scrollWheelZoom: false, doubleClickZoom: false, keyboard: false, touchZoom: false });
+    Leaflet.tileLayer(state.config.mapTileUrl, { attribution: state.config.mapAttribution, maxZoom: 18 }).addTo(marketingMap);
+  }
   updateStoryProgress();
 }
 function updateStoryProgress() {
-  const story = document.querySelector(".story");
+  const story = document.querySelector(".story-v21");
   if (!story) return;
-  const progress = Math.min(1, Math.max(0, window.scrollY / Math.max(1, story.scrollHeight - innerHeight)));
-  document.documentElement.style.setProperty("--story-progress", progress.toFixed(3));
-  document.documentElement.style.setProperty("--phone-rotate", `${(-3 + progress * 8).toFixed(2)}deg`);
+  const progress = Math.min(1, Math.max(0, (window.scrollY - story.offsetTop) / Math.max(1, story.scrollHeight - innerHeight)));
+  const meeting = Math.min(1, Math.max(0, (progress - 0.26) / 0.28));
+  const conclusion = Math.min(1, Math.max(0, (progress - 0.68) / 0.2));
+  const momentOne = 1 - Math.min(1, Math.max(0, (progress - 0.12) / 0.16));
+  const momentTwoIn = Math.min(1, Math.max(0, (progress - 0.18) / 0.14));
+  const momentTwoOut = 1 - Math.min(1, Math.max(0, (progress - 0.61) / 0.13));
+  const momentTwo = Math.min(momentTwoIn, momentTwoOut);
+  const phoneOpacity = 1 - Math.min(1, Math.max(0, (progress - 0.38) / 0.13));
+  const titleOpacity = Math.min(1, Math.max(0, (meeting - 0.16) / 0.4));
+  const actionOpacity = Math.min(1, Math.max(0, (meeting - 0.7) / 0.3));
+  const characterOffset = (1 - meeting) * Math.min(165, innerWidth * 0.26);
+  const saluteAngle = meeting > 0.84 ? Math.sin(((meeting - 0.84) / 0.16) * Math.PI) * 5 : 0;
+  document.documentElement.style.setProperty("--story-progress", progress.toFixed(4));
+  document.documentElement.style.setProperty("--meeting-progress", meeting.toFixed(4));
+  document.documentElement.style.setProperty("--conclusion-progress", conclusion.toFixed(4));
+  document.documentElement.style.setProperty("--moment-one-opacity", momentOne.toFixed(4));
+  document.documentElement.style.setProperty("--moment-two-opacity", momentTwo.toFixed(4));
+  document.documentElement.style.setProperty("--phone-opacity", phoneOpacity.toFixed(4));
+  document.documentElement.style.setProperty("--title-opacity", titleOpacity.toFixed(4));
+  document.documentElement.style.setProperty("--action-opacity", actionOpacity.toFixed(4));
+  document.documentElement.style.setProperty("--action-shift", `${((1 - actionOpacity) * 16).toFixed(2)}px`);
+  document.documentElement.style.setProperty("--character-offset", `${characterOffset.toFixed(2)}px`);
+  document.documentElement.style.setProperty("--salute-angle", `${saluteAngle.toFixed(2)}deg`);
+  document.documentElement.style.setProperty("--phone-shift", `${(-progress * 36).toFixed(2)}px`);
+  document.documentElement.style.setProperty("--photo-scale", (1.06 - progress * 0.035).toFixed(4));
+  document.documentElement.style.setProperty("--moment-two-shift", `${((1 - momentTwo) * 20).toFixed(2)}px`);
+  document.documentElement.style.setProperty("--conclusion-shift", `${((1 - conclusion) * 26).toFixed(2)}px`);
+  document.documentElement.style.setProperty("--phone-rotate", `${(-10 + Math.min(progress, .52) * 35).toFixed(2)}deg`);
   document.querySelector(".back-to-top")?.classList.toggle("visible", progress > 0.72);
 }
 window.addEventListener("scroll", updateStoryProgress, { passive: true });
@@ -469,12 +535,20 @@ async function loadConversations(selectFirst = false) {
 }
 async function start() {
   try {
-    const [data, config] = await Promise.all([
+    const [data, config, context] = await Promise.all([
       api("/api/me"),
       api("/api/config"),
+      api("/api/public-context").catch(() => ({ country: "", region: "", city: "", source: "fallback" })),
     ]);
     state.user = data.user;
     state.config = config;
+    state.geo = context;
+    if (!state.geo.country) {
+      const region = (navigator.languages?.[0] || navigator.language || "").split("-")[1];
+      if (region && /^[A-Za-z]{2}$/.test(region)) state.geo = { ...state.geo, country: region.toUpperCase(), source: "browser-locale" };
+    }
+    state.publicPhotos = selectPhotoSet(state.geo.country);
+    preloadPhotoSet(state.publicPhotos);
     if (state.user) {
       state.view = "map";
       await loadMap();
@@ -491,6 +565,12 @@ async function start() {
   render();
 }
 app.addEventListener("click", async (event) => {
+  if (event.target.classList?.contains("modal-layer")) {
+    state.modal = null;
+    render();
+    requestAnimationFrame(() => document.querySelector(`[data-action="${modalReturnAction}"]`)?.focus());
+    return;
+  }
   const button = event.target.closest("[data-action]");
   if (!button) return;
   const action = button.dataset.action;
@@ -508,6 +588,8 @@ app.addEventListener("click", async (event) => {
       document.querySelector("#possibilities")?.scrollIntoView({ behavior: "smooth", block: "start" });
     if (action === "back-top") window.scrollTo({ top: 0, behavior: "smooth" });
     if (action === "open-auth") {
+      modalReturnAction = action;
+      state.authMode = "login";
       state.modal = "auth";
       render();
     }
@@ -519,14 +601,29 @@ app.addEventListener("click", async (event) => {
       state.publicMenuOpen = !state.publicMenuOpen;
       render();
     }
+    if (action === "cycle-locale") {
+      const locales = ["fr", "en", "ar"];
+      state.locale = locales[(locales.indexOf(state.locale) + 1) % locales.length];
+      localStorage.setItem("servicego-locale", state.locale);
+      render();
+    }
     if (action === "open-faq") {
+      modalReturnAction = action;
       state.publicMenuOpen = false;
       state.modal = "faq";
       render();
     }
     if (action === "open-legal") {
+      modalReturnAction = action;
       state.publicMenuOpen = false;
+      state.legalTab = 0;
       state.modal = "legal";
+      render();
+    }
+    if (action === "open-contact") {
+      modalReturnAction = action;
+      state.publicMenuOpen = false;
+      state.modal = "contact";
       render();
     }
     if (action === "open-info") {
@@ -536,9 +633,18 @@ app.addEventListener("click", async (event) => {
     if (action === "close-modal") {
       state.modal = null;
       render();
+      requestAnimationFrame(() => document.querySelector(`[data-action="${modalReturnAction}"]`)?.focus());
     }
     if (action === "auth-tab") {
       state.authMode = button.dataset.mode;
+      render();
+    }
+    if (action === "toggle-password") {
+      state.passwordVisible = !state.passwordVisible;
+      render();
+    }
+    if (action === "legal-tab") {
+      state.legalTab = Number(button.dataset.index || 0);
       render();
     }
     if (action === "open-request") {
@@ -661,6 +767,13 @@ document.addEventListener("keydown", (event) => {
   if (event.key === "Escape" && state.modal) {
     state.modal = null;
     render();
+    requestAnimationFrame(() => document.querySelector(`[data-action="${modalReturnAction}"]`)?.focus());
+    return;
+  }
+  if (event.key === "Escape" && state.publicMenuOpen) {
+    state.publicMenuOpen = false;
+    render();
+    requestAnimationFrame(() => document.querySelector('[data-action="toggle-public-menu"]')?.focus());
     return;
   }
   if (event.key !== "Tab" || !state.modal) return;
@@ -678,8 +791,19 @@ app.addEventListener("submit", async (event) => {
   event.preventDefault();
   const type = form.dataset.form;
   const values = Object.fromEntries(new FormData(form).entries());
+  const submitButton = form.querySelector('[type="submit"]');
+  if (submitButton?.disabled) return;
+  if (submitButton) submitButton.disabled = true;
   try {
     if (type === "auth") {
+      if (state.authMode === "register") {
+        values.full_name = `${String(values.first_name || "").trim()} ${String(values.last_name || "").trim()}`.trim();
+        values.phone = `${String(values.dial_code || "").trim()}${String(values.phone_number || "").replace(/[^0-9]/g, "")}`;
+        delete values.first_name;
+        delete values.last_name;
+        delete values.dial_code;
+        delete values.phone_number;
+      }
       const endpoint =
         state.authMode === "register"
           ? "/api/auth/register"
@@ -695,9 +819,17 @@ app.addEventListener("submit", async (event) => {
       render();
       notify(
         state.authMode === "register"
-          ? "Un lien de confirmation vient d'etre envoye."
+          ? data.email_delivery_configured
+            ? "Un lien de confirmation vient d'etre envoye."
+            : "Compte cree. L'envoi de confirmation n'est pas encore configure."
           : "Bienvenue sur ServiceGO.",
       );
+    }
+    if (type === "forgot") {
+      const data = await api("/api/auth/forgot-password", { method: "POST", body: JSON.stringify(values) });
+      notify(data.message);
+      state.authMode = "login";
+      render();
     }
     if (type === "request") {
       const city = String(values.district);
@@ -790,6 +922,8 @@ app.addEventListener("submit", async (event) => {
     }
   } catch (error) {
     notify(error.message, true);
+  } finally {
+    if (submitButton?.isConnected) submitButton.disabled = false;
   }
 });
 start();

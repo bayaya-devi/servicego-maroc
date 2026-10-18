@@ -266,6 +266,17 @@ async function handleAuth(request: Request, env: Env, ctx: ExecutionContext, pat
     return json({ ok: true }, 200, { "set-cookie": clearSessionCookie(request) });
   }
 
+  if (pathname === "/api/auth/forgot-password" && request.method === "POST") {
+    const body = await readBody(request);
+    const email = text(body?.email, 254).toLowerCase();
+    if (!validEmail(email)) return badRequest("Indiquez une adresse email valide.");
+    const mailEnv = env as Env & { RESEND_API_KEY?: string; RESEND_FROM_EMAIL?: string };
+    if (!mailEnv.RESEND_API_KEY || !mailEnv.RESEND_FROM_EMAIL) {
+      return json({ error: "La recuperation par email est temporairement indisponible: le service d'envoi n'est pas configure." }, 503);
+    }
+    return json({ error: "La recuperation securisee du mot de passe n'est pas encore activee. Contactez aetbconseil@gmail.com." }, 503);
+  }
+
   if (pathname !== "/api/auth/register" && pathname !== "/api/auth/login") return null;
   if (request.method !== "POST") return json({ error: "Methode non autorisee." }, 405);
   const body = await readBody(request);
@@ -276,7 +287,7 @@ async function handleAuth(request: Request, env: Env, ctx: ExecutionContext, pat
 
   if (pathname === "/api/auth/register") {
     const fullName = text(body.full_name, 80);
-    const district = text(body.district, 80) || "Rabat";
+    const district = text(body.district, 80) || "Non renseignee";
     if (fullName.length < 2) return badRequest("Indiquez votre prenom et nom.");
     if (!(await verifyTurnstile(text(body.turnstile_token, 2048), request, env))) return badRequest("Verification anti-abus invalide.");
     const exists = await env.DB.prepare("SELECT id FROM profiles WHERE email = ?").bind(email).first<{ id: string }>();
@@ -289,7 +300,10 @@ async function handleAuth(request: Request, env: Env, ctx: ExecutionContext, pat
     const verificationToken = await createEmailVerification(env, id, email, "signup");
     ctx.waitUntil(sendVerificationEmail(env, email, fullName, verificationToken, new URL(request.url).origin, "signup"));
     const user = await currentUser(new Request(request.url, { headers: { cookie: `sg_session=${sessionId}` } }), env);
-    return json({ user }, 201, { "set-cookie": sessionCookie(sessionId, request) });
+    return json({
+      user,
+      email_delivery_configured: Boolean((env as Env & { RESEND_API_KEY?: string; RESEND_FROM_EMAIL?: string }).RESEND_API_KEY && (env as Env & { RESEND_FROM_EMAIL?: string }).RESEND_FROM_EMAIL),
+    }, 201, { "set-cookie": sessionCookie(sessionId, request) });
   }
 
   const account = await env.DB.prepare(
@@ -310,6 +324,15 @@ async function handleApi(request: Request, env: Env, ctx: ExecutionContext): Pro
   if (authResponse) return authResponse;
 
   if (pathname === "/api/health") return json({ ok: true, city: env.APP_CITY, time: new Date().toISOString() });
+  if (pathname === "/api/public-context") {
+    const cf = (request as Request & { cf?: { country?: string; region?: string; city?: string } }).cf;
+    return json({
+      country: text(cf?.country, 2).toUpperCase(),
+      region: text(cf?.region, 80),
+      city: text(cf?.city, 80),
+      source: cf?.country ? "cloudflare" : "fallback",
+    }, 200, { "cache-control": "private, max-age=300" });
+  }
   if (pathname === "/api/config") {
     const mapEnv = env as Env & { MAP_TILE_URL?: string; MAP_ATTRIBUTION?: string };
     return json({
@@ -401,6 +424,8 @@ async function handleApi(request: Request, env: Env, ctx: ExecutionContext): Pro
     const user = await requireUser(request, env);
     if (isResponse(user)) return user;
     if (user.email_verified) return badRequest("Votre adresse est deja confirmee.");
+    const mailEnv = env as Env & { RESEND_API_KEY?: string; RESEND_FROM_EMAIL?: string };
+    if (!mailEnv.RESEND_API_KEY || !mailEnv.RESEND_FROM_EMAIL) return json({ error: "L'envoi d'email n'est pas encore configure." }, 503);
     const token = await createEmailVerification(env, user.id, user.email, "signup");
     ctx.waitUntil(sendVerificationEmail(env, user.email, user.full_name, token, new URL(request.url).origin, "signup"));
     return json({ message: "Un nouveau lien de confirmation a ete envoye." }, 202);

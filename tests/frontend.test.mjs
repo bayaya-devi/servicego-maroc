@@ -63,3 +63,47 @@ test("deployment targets the active branch and D1 database", async () => {
   assert.match(workflow, /branches: \[master\]/);
   assert.match(workflow, /d1 migrations apply servicego-production --remote/);
 });
+
+test("V2.1 uses one scroll-driven viewport with a real marketing map", async () => {
+  const [source, styles] = await Promise.all([read("public/app.js"), read("public/styles.css")]);
+  assert.match(source, /class="story-viewport"/);
+  assert.match(source, /id="marketing-map"/);
+  assert.match(source, /Leaflet\.map\(mapElement/);
+  assert.match(source, /--meeting-progress/);
+  assert.match(styles, /\.story-viewport\s*\{[^}]*position:sticky/s);
+  assert.match(styles, /rotateY\(var\(--phone-rotate/);
+  assert.doesNotMatch(source, /class="visitor-brand"/);
+  assert.doesNotMatch(source, />Découvrir <span/);
+});
+
+test("V2.1 public nucleus expands horizontally and exposes icon actions", async () => {
+  const [source, styles] = await Promise.all([read("public/app.js"), read("public/styles.css")]);
+  assert.match(source, /class="nucleus-secondary"/);
+  assert.match(source, /data-action="cycle-locale"/);
+  assert.match(source, /data-action="open-contact"/);
+  assert.match(source, /state\.publicMenuOpen \? "−" : "\+"/);
+  assert.doesNotMatch(source, /class="nucleus-more"/);
+  assert.match(styles, /\.is-expanded \.nucleus-secondary\s*\{[^}]*width:/s);
+});
+
+test("V2.1 signup, recovery and public information are complete", async () => {
+  const [source, worker] = await Promise.all([read("public/app.js"), read("worker/index.ts")]);
+  assert.match(source, /name="first_name"/);
+  assert.match(source, /name="last_name"/);
+  assert.match(source, /name="dial_code"/);
+  assert.match(source, /data-form="forgot"/);
+  assert.match(source, /aetbconseil@gmail\.com/);
+  assert.match(source, /data-action="legal-tab"/);
+  assert.match(worker, /\/api\/auth\/forgot-password/);
+  assert.match(worker, /\/api\/public-context/);
+});
+
+test("photo selection is deterministic and falls back internationally", async () => {
+  const { photoCatalog, selectPhotoSet } = await import("../public/photo-catalog.js");
+  assert.ok(photoCatalog.length >= 6);
+  const madrid = selectPhotoSet("ES", () => 0.5);
+  assert.equal(madrid.length, 2);
+  assert.ok(madrid.every((photo) => photo.country === "ES"));
+  assert.deepEqual(selectPhotoSet("XX", () => 0), selectPhotoSet("XX", () => 0));
+  assert.ok(photoCatalog.every((photo) => photo.credit && photo.license && photo.source && photo.alt.fr && photo.alt.en && photo.alt.ar));
+});
