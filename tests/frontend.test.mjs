@@ -98,6 +98,19 @@ test("V2.1 signup, recovery and public information are complete", async () => {
   assert.match(worker, /\/api\/public-context/);
 });
 
+test("the immediate-help CTA preserves request intent through authentication", async () => {
+  const [source, styles] = await Promise.all([read("public/app.js"), read("public/styles.css")]);
+  assert.match(source, /data-action="urgent-request"/);
+  assert.match(source, /J'ai besoin d'aide maintenant/);
+  assert.match(source, /I need help now/);
+  assert.match(source, /أحتاج إلى المساعدة الآن/);
+  assert.match(source, /state\.pendingIntent = "request"/);
+  assert.match(source, /state\.authMode = "register"/);
+  assert.match(source, /continueToRequest \? "request" : null/);
+  assert.match(styles, /\.urgent-help-cta\s*\{[^}]*backdrop-filter:[^}]*animation:urgent-help-pulse/s);
+  assert.match(styles, /\.discover-arrow,\.urgent-help-cta\s*\{\s*animation:none/);
+});
+
 test("photo selection is deterministic and falls back internationally", async () => {
   const { photoCatalog, selectPhotoSet } = await import("../public/photo-catalog.js");
   assert.ok(photoCatalog.length >= 6);

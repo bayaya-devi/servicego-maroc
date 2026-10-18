@@ -17,6 +17,7 @@ const state = {
   selected: null,
   modal: null,
   authMode: "login",
+  pendingIntent: null,
   conversations: [],
   activeConversation: null,
   messages: [],
@@ -69,6 +70,7 @@ const uiTranslations = {
 };
 Object.assign(uiTranslations.en, {
   "Un besoin.": "One need.", "Une personne.": "One person.", "Une solution.": "One solution.",
+  "J'ai besoin d'aide maintenant": "I need help now",
   "Découvrir": "Discover", "Deux possibilités. Un seul compte.": "Two possibilities. One account.",
   "Je demande": "I request", "Trouvez une personne proche.": "Find someone nearby.", "Je propose": "I offer",
   "Proposez vos services et soyez rémunéré.": "Offer your services and get paid.",
@@ -78,10 +80,17 @@ Object.assign(uiTranslations.en, {
   "Fuite": "Leak repair", "Peinture": "Painting", "Livraison": "Delivery", "Menage": "Cleaning",
   "Prenom": "First name", "Nom": "Last name", "Mot de passe oublié ?": "Forgot password?",
   "Afficher le mot de passe": "Show password", "Masquer le mot de passe": "Hide password",
-  "Nous ecrire": "Email us", "Envoyer le lien": "Send link", "Retour a la connexion": "Back to sign in"
+  "Nous ecrire": "Email us", "Envoyer le lien": "Send link", "Retour a la connexion": "Back to sign in",
+  "Creer mon compte": "Create my account", "Indicatif": "Country code", "Indicatif international": "International country code",
+  "Un seul compte pour demander un service et proposer votre aide.": "One account to request a service and offer your help.",
+  "Quel besoin avez-vous ?": "What do you need?", "Service": "Service", "Ville": "City", "Titre court": "Short title",
+  "Expliquez simplement": "Explain it simply", "Budget (optionnel)": "Budget (optional)", "Photo (optionnelle)": "Photo (optional)",
+  "Ex: Fuite sous evier": "E.g. Leak under the sink", "Ce qui doit etre fait, et quand.": "What needs to be done, and when.",
+  "Ex: 150 - 250 DH": "E.g. MAD 150-250"
 });
 Object.assign(uiTranslations.ar, {
   "Un besoin.": "حاجة واحدة.", "Une personne.": "شخص واحد.", "Une solution.": "حل واحد.",
+  "J'ai besoin d'aide maintenant": "أحتاج إلى المساعدة الآن",
   "Découvrir": "اكتشف", "Deux possibilités. Un seul compte.": "خياران. حساب واحد.",
   "Je demande": "أطلب", "Trouvez une personne proche.": "اعثر على شخص قريب.", "Je propose": "أعرض",
   "Proposez vos services et soyez rémunéré.": "اعرض خدماتك واحصل على مقابل.",
@@ -91,7 +100,13 @@ Object.assign(uiTranslations.ar, {
   "Fuite": "إصلاح تسرب", "Peinture": "صباغة", "Livraison": "توصيل", "Menage": "تنظيف",
   "Prenom": "الاسم الأول", "Nom": "اسم العائلة", "Mot de passe oublié ?": "هل نسيت كلمة المرور؟",
   "Afficher le mot de passe": "إظهار كلمة المرور", "Masquer le mot de passe": "إخفاء كلمة المرور",
-  "Nous ecrire": "راسلنا", "Envoyer le lien": "إرسال الرابط", "Retour a la connexion": "العودة إلى تسجيل الدخول"
+  "Nous ecrire": "راسلنا", "Envoyer le lien": "إرسال الرابط", "Retour a la connexion": "العودة إلى تسجيل الدخول",
+  "Creer mon compte": "إنشاء حسابي", "Indicatif": "رمز البلد", "Indicatif international": "رمز البلد الدولي",
+  "Un seul compte pour demander un service et proposer votre aide.": "حساب واحد لطلب خدمة وعرض مساعدتك.",
+  "Quel besoin avez-vous ?": "ما الخدمة التي تحتاجها؟", "Service": "الخدمة", "Ville": "المدينة", "Titre court": "عنوان مختصر",
+  "Expliquez simplement": "اشرح ببساطة", "Budget (optionnel)": "الميزانية (اختيارية)", "Photo (optionnelle)": "صورة (اختيارية)",
+  "Ex: Fuite sous evier": "مثال: تسرب تحت الحوض", "Ce qui doit etre fait, et quand.": "ما المطلوب إنجازه ومتى.",
+  "Ex: 150 - 250 DH": "مثال: 150 - 250 درهم"
 });
 function localizeDom() {
   if (state.locale === "fr") return;
@@ -191,7 +206,7 @@ function homeView() {
   const alt = (photo) => escape(photo.alt[state.locale] || photo.alt.fr);
   const credit = [...new Set(photos.map((photo) => photo.credit))].join(" · ");
   const characters = `<div class="character-stage" aria-label="Les deux personnages ServiceGO se rencontrent"><span class="character blue-character" aria-hidden="true"></span><span class="meeting-light" aria-hidden="true"></span><span class="character green-character" aria-hidden="true"></span></div>`;
-  return `<main id="main-content" class="story-v21" tabindex="-1" style="--photo-one:url('${first.resolutions.large}');--photo-two:url('${second.resolutions.large}')"><div class="story-scroll" aria-hidden="true"><span id="moment-one"></span><span id="possibilities"></span><span id="moment-three"></span></div><div class="story-viewport"><div class="story-photo photo-one" role="img" aria-label="${alt(first)}"></div><div class="story-photo photo-two" role="img" aria-label="${alt(second)}"></div><div class="story-light" aria-hidden="true"></div><section class="narrative moment-one" aria-labelledby="story-title"><div class="discovery-copy"><h1 id="story-title"><span>Un besoin.</span><span>Une personne.</span><span>Une solution.</span></h1></div><div class="device-perspective"><div class="smartphone" aria-label="Apercu fictif de ServiceGO"><div class="phone-frame"><div class="phone-speaker" aria-hidden="true"></div><div class="phone-screen"><div class="phone-status" aria-hidden="true"><span>9:41</span><span>● ● ▰</span></div><div id="marketing-map" class="marketing-map" aria-label="Carte geographique fictive"><div class="marketing-pins">${staticBubble("need", "Fuite", "left:38%;top:42%", true)}${staticBubble("help", "Peinture", "left:62%;top:28%")}${staticBubble("need", "Livraison", "left:58%;top:62%")}${staticBubble("help", "Menage", "left:34%;top:73%")}</div></div></div><span class="phone-reflection" aria-hidden="true"></span></div></div></div><button class="discover-arrow" data-action="discover" aria-label="Découvrir"><span aria-hidden="true">↓</span></button></section><section class="narrative moment-two" aria-labelledby="possibility-title"><div class="story-content"><h2 id="possibility-title">Deux possibilités. Un seul compte.</h2>${characters}<div class="possibility-actions"><button class="possibility need" data-action="open-auth" data-intent="request"><span>Je demande</span></button><button class="possibility offer" data-action="open-auth" data-intent="offer"><span>Je propose</span></button></div></div></section><section class="narrative moment-three" aria-labelledby="conclusion-title"><div class="story-content">${characters}<h2 id="conclusion-title">L'entraide commence ici.</h2><button class="button large join" data-action="open-auth">Rejoindre ServiceGO</button><p class="photo-credit">Photos: ${escape(credit)} · Unsplash</p></div></section></div></main><button class="back-to-top" data-action="back-top" aria-label="Retour en haut">↑</button>`;
+  return `<main id="main-content" class="story-v21" tabindex="-1" style="--photo-one:url('${first.resolutions.large}');--photo-two:url('${second.resolutions.large}')"><div class="story-scroll" aria-hidden="true"><span id="moment-one"></span><span id="possibilities"></span><span id="moment-three"></span></div><div class="story-viewport"><div class="story-photo photo-one" role="img" aria-label="${alt(first)}"></div><div class="story-photo photo-two" role="img" aria-label="${alt(second)}"></div><div class="story-light" aria-hidden="true"></div><section class="narrative moment-one" aria-labelledby="story-title"><div class="discovery-copy"><h1 id="story-title"><span>Un besoin.</span><span>Une personne.</span><span>Une solution.</span></h1><button class="urgent-help-cta" data-action="urgent-request" aria-label="J'ai besoin d'aide maintenant"><span class="urgent-help-icon" aria-hidden="true">⚡</span><span>J'ai besoin d'aide maintenant</span></button></div><div class="device-perspective"><div class="smartphone" aria-label="Apercu fictif de ServiceGO"><div class="phone-frame"><div class="phone-speaker" aria-hidden="true"></div><div class="phone-screen"><div class="phone-status" aria-hidden="true"><span>9:41</span><span>● ● ▰</span></div><div id="marketing-map" class="marketing-map" aria-label="Carte geographique fictive"><div class="marketing-pins">${staticBubble("need", "Fuite", "left:38%;top:42%", true)}${staticBubble("help", "Peinture", "left:62%;top:28%")}${staticBubble("need", "Livraison", "left:58%;top:62%")}${staticBubble("help", "Menage", "left:34%;top:73%")}</div></div></div><span class="phone-reflection" aria-hidden="true"></span></div></div></div><button class="discover-arrow" data-action="discover" aria-label="Découvrir"><span aria-hidden="true">↓</span></button></section><section class="narrative moment-two" aria-labelledby="possibility-title"><div class="story-content"><h2 id="possibility-title">Deux possibilités. Un seul compte.</h2>${characters}<div class="possibility-actions"><button class="possibility need" data-action="open-auth" data-intent="request"><span>Je demande</span></button><button class="possibility offer" data-action="open-auth" data-intent="offer"><span>Je propose</span></button></div></div></section><section class="narrative moment-three" aria-labelledby="conclusion-title"><div class="story-content">${characters}<h2 id="conclusion-title">L'entraide commence ici.</h2><button class="button large join" data-action="open-auth">Rejoindre ServiceGO</button><p class="photo-credit">Photos: ${escape(credit)} · Unsplash</p></div></section></div></main><button class="back-to-top" data-action="back-top" aria-label="Retour en haut">↑</button>`;
 }
 function mapBubbles() {
   const entries = [
@@ -461,6 +476,10 @@ function render() {
   if (state.user && state.view === "map") mountInteractiveMap();
   if (!state.user || state.view === "home") initializeStory();
 }
+function closeModal() {
+  if (state.modal === "auth") state.pendingIntent = null;
+  state.modal = null;
+}
 function initializeStory() {
   if (marketingMap) marketingMap.remove();
   const mapElement = document.querySelector("#marketing-map");
@@ -503,6 +522,8 @@ function updateStoryProgress() {
   document.documentElement.style.setProperty("--moment-two-shift", `${((1 - momentTwo) * 20).toFixed(2)}px`);
   document.documentElement.style.setProperty("--conclusion-shift", `${((1 - conclusion) * 26).toFixed(2)}px`);
   document.documentElement.style.setProperty("--phone-rotate", `${(-10 + Math.min(progress, .52) * 35).toFixed(2)}deg`);
+  document.querySelector(".moment-two")?.classList.toggle("is-interactive", actionOpacity > 0.45);
+  document.querySelector(".moment-three")?.classList.toggle("is-interactive", conclusion > 0.45);
   document.querySelector(".back-to-top")?.classList.toggle("visible", progress > 0.72);
 }
 window.addEventListener("scroll", updateStoryProgress, { passive: true });
@@ -566,7 +587,7 @@ async function start() {
 }
 app.addEventListener("click", async (event) => {
   if (event.target.classList?.contains("modal-layer")) {
-    state.modal = null;
+    closeModal();
     render();
     requestAnimationFrame(() => document.querySelector(`[data-action="${modalReturnAction}"]`)?.focus());
     return;
@@ -589,8 +610,22 @@ app.addEventListener("click", async (event) => {
     if (action === "back-top") window.scrollTo({ top: 0, behavior: "smooth" });
     if (action === "open-auth") {
       modalReturnAction = action;
+      state.pendingIntent = null;
       state.authMode = "login";
       state.modal = "auth";
+      render();
+    }
+    if (action === "urgent-request") {
+      modalReturnAction = action;
+      if (state.user) {
+        if (!state.categories.length) await loadMap();
+        state.view = "map";
+        state.modal = "request";
+      } else {
+        state.pendingIntent = "request";
+        state.authMode = "register";
+        state.modal = "auth";
+      }
       render();
     }
     if (action === "open-quick") {
@@ -631,7 +666,7 @@ app.addEventListener("click", async (event) => {
       render();
     }
     if (action === "close-modal") {
-      state.modal = null;
+      closeModal();
       render();
       requestAnimationFrame(() => document.querySelector(`[data-action="${modalReturnAction}"]`)?.focus());
     }
@@ -737,6 +772,7 @@ app.addEventListener("click", async (event) => {
       state.view = "home";
       state.selected = null;
       state.modal = null;
+      state.pendingIntent = null;
       render();
       notify("Vous etes deconnecte.");
     }
@@ -765,7 +801,7 @@ document.addEventListener("click", (event) => {
 });
 document.addEventListener("keydown", (event) => {
   if (event.key === "Escape" && state.modal) {
-    state.modal = null;
+    closeModal();
     render();
     requestAnimationFrame(() => document.querySelector(`[data-action="${modalReturnAction}"]`)?.focus());
     return;
@@ -813,7 +849,9 @@ app.addEventListener("submit", async (event) => {
         body: JSON.stringify(values),
       });
       state.user = data.user;
-      state.modal = null;
+      const continueToRequest = state.pendingIntent === "request";
+      state.pendingIntent = null;
+      state.modal = continueToRequest ? "request" : null;
       state.view = "map";
       await loadMap();
       render();

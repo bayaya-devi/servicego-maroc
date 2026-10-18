@@ -95,6 +95,63 @@ async function validateResponsive(browser) {
   }
 }
 
+const testUser = {
+  id: "user-cta-test",
+  email: "test@servicego.ma",
+  full_name: "Test ServiceGO",
+  phone: "+212600000000",
+  district: "Rabat",
+  avatar_url: null,
+  bio: null,
+  rating: 5,
+  review_count: 0,
+  is_admin: 0,
+  email_verified: 1,
+};
+
+async function mockMemberApis(page) {
+  await page.route("**/api/map", (route) => route.fulfill({ json: { requests: [], services: [] } }));
+  await page.route("**/api/categories", (route) => route.fulfill({ json: { categories: [{ id: "cat-1", name: "Plomberie", icon: "tool" }] } }));
+}
+
+async function validateUrgentIntent(browser) {
+  const registration = await browser.newPage({ viewport: { width: 390, height: 844 } });
+  await mockMemberApis(registration);
+  await registration.route("**/api/auth/register", (route) => route.fulfill({ json: { user: testUser, email_delivery_configured: true } }));
+  await registration.goto(baseUrl, { waitUntil: "networkidle" });
+  await registration.locator('[data-action="urgent-request"]').click();
+  assert.ok(await registration.locator('input[name="first_name"]').isVisible(), "urgent CTA did not open registration");
+  await registration.locator('input[name="first_name"]').fill("Test");
+  await registration.locator('input[name="last_name"]').fill("ServiceGO");
+  await registration.locator('input[name="email"]').fill("test@servicego.ma");
+  await registration.locator('input[name="phone_number"]').fill("600000000");
+  await registration.locator('input[name="password"]').fill("ServiceGO123!");
+  await registration.locator('form[data-form="auth"] button[type="submit"]').click();
+  await registration.waitForSelector('form[data-form="request"]');
+  await registration.close();
+
+  const login = await browser.newPage({ viewport: { width: 1024, height: 768 } });
+  await mockMemberApis(login);
+  await login.route("**/api/auth/login", (route) => route.fulfill({ json: { user: testUser } }));
+  await login.goto(baseUrl, { waitUntil: "networkidle" });
+  await login.locator('[data-action="urgent-request"]').click();
+  await login.locator('[data-action="auth-tab"][data-mode="login"]').click();
+  await login.locator('input[name="email"]').fill("test@servicego.ma");
+  await login.locator('input[name="password"]').fill("ServiceGO123!");
+  await login.locator('form[data-form="auth"] button[type="submit"]').click();
+  await login.waitForSelector('form[data-form="request"]');
+  await login.close();
+
+  const authenticated = await browser.newPage({ viewport: { width: 1440, height: 900 } });
+  await mockMemberApis(authenticated);
+  await authenticated.route("**/api/me", (route) => route.fulfill({ json: { user: testUser } }));
+  await authenticated.goto(baseUrl, { waitUntil: "networkidle" });
+  await authenticated.locator('[data-action="home"]').first().click();
+  await authenticated.locator('[data-action="urgent-request"]').click();
+  assert.ok(await authenticated.locator('form[data-form="request"]').isVisible(), "signed-in CTA did not open request creation");
+  await authenticated.close();
+}
+
 (async () => {
   await mkdir(output, { recursive: true });
   const chromeCandidates = [
@@ -107,6 +164,7 @@ async function validateResponsive(browser) {
   await captureSuite(browser, "desktop-1440x900", { width: 1440, height: 900 });
   await captureSuite(browser, "mobile-390x844", { width: 390, height: 844 });
   await validateResponsive(browser);
+  await validateUrgentIntent(browser);
 
   const rtl = await browser.newPage({ viewport: { width: 390, height: 844 }, reducedMotion: "no-preference" });
   await rtl.addInitScript(() => localStorage.setItem("servicego-locale", "ar"));
