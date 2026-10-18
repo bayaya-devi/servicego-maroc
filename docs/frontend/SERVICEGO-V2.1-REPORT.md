@@ -4,7 +4,8 @@ Date de verification : 19 octobre 2026
 Branche : `master`  
 Reference auditee : `b339c4b`  
 Previsualisation : https://servicego-v21-preview.aetbconseil.workers.dev  
-Version Cloudflare : `a7776a07-3963-4e62-a1c0-737697d24574`  
+Version Cloudflare : `f7d7805e-9f5c-46f6-a552-77fbc3bbfa2f`  
+Commit d'implementation : `ede9547` (`feat: preparer ServiceGO V2.1 immersive`)  
 Production actuelle non remplacee : https://servicego-maroc.aetbconseil.workers.dev
 
 ## Perimetre livre
