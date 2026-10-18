@@ -26,7 +26,7 @@ Les sources de verite sont `public/tokens.css` et les composants de `public/styl
 - Connexion menthe: `#43C6A5`
 - Rayon composant: 8 px maximum, sauf bulles, avatars et controles circulaires.
 - Cible interactive: 44 x 44 px minimum.
-- Police: pile systeme afin d'eviter un blocage reseau.
+- Police latine: Manrope auto-hebergee. Police arabe: Noto Sans Arabic auto-hebergee.
 - Effet verre: reserve a la navigation et aux panneaux flottants; toujours avec bordure et solution de repli.
 
 ## Contenu
@@ -50,4 +50,24 @@ Les sources de verite sont `public/tokens.css` et les composants de `public/styl
 - Les changements de vue mettent a jour le titre du document.
 - Les animations respectent `prefers-reduced-motion`.
 - Une route admin doit etre protegee a la fois dans l'interface et dans l'API.
+
+## ServiceGO Ambient Light
+
+- La lumiere bleue accompagne la decouverte et les demandes.
+- La lumiere peche accompagne les offres.
+- La lumiere menthe apparait au moment de la rencontre.
+- Les ombres suivent quatre niveaux: contact, flottante, panneau et profondeur.
+- Les surfaces translucides sont reservees aux noyaux et panneaux flottants.
+- Les photographies restent lisibles derriere des couches atmospheriques qui garantissent le contraste.
+
+## Mouvement
+
+- Les scenes apparaissent avec `IntersectionObserver`; le scroll reste naturel.
+- Les personnages se rapprochent une seule fois par entree dans la scene.
+- Le retour en haut n'apparait qu'apres 72 % du parcours public.
+- `prefers-reduced-motion` remplace les mouvements par une composition statique.
+
+## Logo
+
+Le PNG officiel demeure la reference. Les variantes d'interface utilisent des masques et positions CSS sur ce meme fichier. Aucun trait, personnage ou symbole n'est recree.
 

@@ -1,6 +1,6 @@
 # Audit frontend ServiceGO
 
-Date: 18 octobre 2026
+Date: 18 octobre 2026 - revision V2
 
 ## Resume executif
 
@@ -56,4 +56,12 @@ La refonte conserve les contrats API et les donnees. Elle introduit une coque re
 - Photos: bucket R2 non active.
 - Moderation complete, paiement, verification d'identite et support: APIs metier absentes.
 - Vraie cartographie 3D WebGL: moteur et fournisseur de donnees absents.
+
+## Revision V2
+
+La capture `q.png` a confirme que le symbole officiel etait visuellement trop petit a cause des marges blanches internes du PNG. Le fichier source est conserve intact; son cadrage est corrige par un masque CSS reutilisable.
+
+La V2 introduit un accueil continu en trois scenes, un noyau public a trois commandes, une FAQ et un espace legal public. Les deux personnages sont isoles visuellement a partir du fichier officiel par cadrage CSS, sans redessin. Deux photographies Unsplash libres d'utilisation sont stockees localement et creditees dans la scene finale.
+
+La portee operationnelle reste le Maroc car le backend valide actuellement des coordonnees marocaines. La vocation mondiale decrite dans la vision produit n'est donc pas presentee comme une capacite deja disponible.
 

@@ -30,6 +30,26 @@ test("critical member controls and three locales are present", async () => {
   assert.match(source, /[\u0600-\u06ff]/);
 });
 
+test("the V2 public story uses the official characters and exact narrative", async () => {
+  const [source, styles] = await Promise.all([read("public/app.js"), read("public/styles.css")]);
+  assert.match(source, /Un besoin\.<\/span><span>Une personne\.<\/span><span>Une solution\./);
+  assert.match(source, /Deux possibilités\. Un seul compte\./);
+  assert.match(source, /L'entraide commence ici\./);
+  assert.match(source, /class="character blue-character"/);
+  assert.match(source, /class="character green-character"/);
+  assert.match(styles, /servicego-symbol\.png/);
+  assert.match(styles, /prefers-reduced-motion:reduce/);
+});
+
+test("public information and immersive assets are wired locally", async () => {
+  const [source, styles] = await Promise.all([read("public/app.js"), read("public/styles.css")]);
+  assert.match(source, /faqModal/);
+  assert.match(source, /legalModal/);
+  assert.match(styles, /assets\/scenes\/rabat-people\.jpg/);
+  assert.match(styles, /assets\/scenes\/marrakech-people\.jpg/);
+  assert.doesNotMatch(source, /mailto:contact@servicego\.ma/);
+});
+
 test("the operational map requires a session and rounds coordinates", async () => {
   const worker = await read("worker/index.ts");
   const route = worker.slice(worker.indexOf('pathname === "/api/map"'), worker.indexOf('pathname === "/api/me" && request.method === "PATCH"'));

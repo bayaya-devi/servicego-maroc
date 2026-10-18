@@ -1,3 +1,9 @@
+@font-face { font-family: "Manrope"; src: url("/assets/fonts/manrope-400.ttf") format("truetype"); font-weight: 400; font-display: swap; }
+@font-face { font-family: "Manrope"; src: url("/assets/fonts/manrope-600.ttf") format("truetype"); font-weight: 600; font-display: swap; }
+@font-face { font-family: "Manrope"; src: url("/assets/fonts/manrope-800.ttf") format("truetype"); font-weight: 800; font-display: swap; }
+@font-face { font-family: "Noto Sans Arabic"; src: url("/assets/fonts/noto-arabic-400.ttf") format("truetype"); font-weight: 400; font-display: swap; }
+@font-face { font-family: "Noto Sans Arabic"; src: url("/assets/fonts/noto-arabic-700.ttf") format("truetype"); font-weight: 700; font-display: swap; }
+
 :root {
   color-scheme: light;
   --sg-blue: #2585e6;
@@ -14,13 +20,18 @@
   --sg-line: #d7e2ec;
   --sg-danger: #b42318;
   --sg-focus: #0b66c3;
-  --sg-shadow-sm: 0 6px 20px rgba(20, 34, 56, 0.12);
-  --sg-shadow-lg: 0 22px 70px rgba(20, 34, 56, 0.2);
+  --sg-shadow-contact: 0 2px 8px rgba(20, 34, 56, 0.1);
+  --sg-shadow-sm: 0 8px 26px rgba(20, 34, 56, 0.13);
+  --sg-shadow-lg: 0 28px 90px rgba(20, 34, 56, 0.22);
+  --sg-light-mint: rgba(67, 198, 165, 0.24);
+  --sg-light-blue: rgba(37, 133, 230, 0.22);
+  --sg-light-peach: rgba(255, 145, 56, 0.2);
   --sg-radius-sm: 6px;
   --sg-radius: 8px;
   --sg-target: 44px;
   --sg-content: 1180px;
-  --sg-font: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  --sg-font: "Manrope", ui-sans-serif, system-ui, sans-serif;
+  --sg-font-ar: "Noto Sans Arabic", "Manrope", sans-serif;
 }
 
 @media (prefers-color-scheme: dark) {
@@ -38,4 +49,6 @@
     --sg-focus: #8ac6ff;
   }
 }
+
+[dir="rtl"] { --sg-font: var(--sg-font-ar); }
 
