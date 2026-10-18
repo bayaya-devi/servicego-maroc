@@ -4,8 +4,9 @@ Date de verification : 19 octobre 2026
 Branche : `master`  
 Reference auditee : `b339c4b`  
 Previsualisation : https://servicego-v21-preview.aetbconseil.workers.dev  
-Version Cloudflare : `f7d7805e-9f5c-46f6-a552-77fbc3bbfa2f`  
+Version Cloudflare : `789c526c-8e20-4caf-934a-70185a27a079`  
 Commit d'implementation : `ede9547` (`feat: preparer ServiceGO V2.1 immersive`)  
+Correctif aide immediate : `23d4624` (`feat: ajouter le parcours d'aide immediate`)  
 Production actuelle non remplacee : https://servicego-maroc.aetbconseil.workers.dev
 
 ## Perimetre livre
@@ -17,6 +18,7 @@ Production actuelle non remplacee : https://servicego-maroc.aetbconseil.workers.
 - Connexion, inscription, recuperation, FAQ, informations legales et contact refondus en verre depoli.
 - FR, EN et AR avec RTL complet sur les interfaces publiques.
 - Catalogue photo local, optimise, documente et extensible par pays.
+- Bouton d'aide immediate en verre depoli avec intention conservee jusqu'a la creation d'une demande apres inscription ou connexion.
 
 Les cartes membres, tableaux de bord, profils, annonces et administration n'ont pas ete refondus.
 
@@ -90,7 +92,7 @@ Google Maps n'a pas ete utilise car aucune cle ni integration officielle n'est c
 
 ## Tests et captures
 
-- `npm test` : 11 tests passes.
+- `npm test` : 12 tests passes.
 - `npm run check` : generation des types Wrangler reussie.
 - `node --check public/app.js` : reussi.
 - Tests visuels automatises : 23 captures.
@@ -98,6 +100,7 @@ Google Maps n'a pas ete utilise car aucune cle ni integration officielle n'est c
 - Langues verifiees : FR, EN et AR/RTL.
 - Themes verifies : clair et sombre.
 - Aucun debordement horizontal ni erreur JavaScript detecte dans la matrice.
+- Parcours d'aide immediate valides sur le serveur local puis sur la previsualisation Cloudflare : inscription, connexion et session deja ouverte.
 
 Les captures avant V2.1 restent celles de V2 documentees dans `QA-REPORT.md`. Les captures apres correction sont dans `docs/frontend/screenshots-v21/` : premier moment, deuxieme moment, rencontre, conclusion, noyau ferme/ouvert, connexion, inscription, FAQ, juridique et contact, sur desktop et mobile, plus un controle arabe RTL.
 
