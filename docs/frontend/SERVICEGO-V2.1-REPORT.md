@@ -4,11 +4,12 @@ Date de verification : 19 octobre 2026
 Branche : `servicego-v2.1-preview`  
 Reference auditee : `4a40e32`  
 Previsualisation : https://servicego-v21-preview.aetbconseil.workers.dev  
-Version Cloudflare : `6838868a-ab65-4243-9b75-d2519985aaf8`  
+Version Cloudflare de previsualisation : `492ed3d1-1f9c-4b2a-adbb-603c6522f427`  
+Version Cloudflare de production : `e01859d5-56ea-4a87-b302-95597cbc0095`  
 Commit d'implementation : `ede9547` (`feat: preparer ServiceGO V2.1 immersive`)  
 Correctif aide immediate : `23d4624` (`feat: ajouter le parcours d'aide immediate`)  
 Correctif linguistique : `4a40e32` (`fix: corriger les textes et traductions`)  
-Production actuelle non remplacee : https://servicego-maroc.aetbconseil.workers.dev
+Production publiee : https://servicego-maroc.aetbconseil.workers.dev
 
 ## Perimetre livre
 
@@ -143,4 +144,4 @@ Les tests existants sur la carte membre privee, l'arrondi des coordonnees, la ba
 
 ## Livraison
 
-La previsualisation Cloudflare est distincte de la production. Elle est prete pour validation humaine. La production ne doit etre remplacee qu'apres accord explicite du proprietaire.
+La previsualisation Cloudflare reste distincte de la production. La version V2.1 complete, y compris le correctif linguistique et les personnages SVG independants, est maintenant publiee sur les deux environnements apres accord explicite du proprietaire.

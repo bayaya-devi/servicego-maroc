@@ -2,7 +2,7 @@
 
 Date : 19 octobre 2026  
 Branche : `servicego-v2.1-preview`  
-Statut : correction validee localement et prete au deploiement
+Statut : correction validee et publiee
 
 ## Correction
 
@@ -38,4 +38,10 @@ Les captures desktop et mobile sont conservees dans `docs/frontend/screenshots-v
 - `public/assets/servicego-character-blue.svg`
 - `public/assets/servicego-character-green.svg`
 
-La production et la previsualisation Cloudflare n'ont pas ete modifiees pendant cette preparation.
+## Publication
+
+- Previsualisation : https://servicego-v21-preview.aetbconseil.workers.dev
+- Version Cloudflare de previsualisation : `492ed3d1-1f9c-4b2a-adbb-603c6522f427`
+- Production : https://servicego-maroc.aetbconseil.workers.dev
+- Version Cloudflare de production : `e01859d5-56ea-4a87-b302-95597cbc0095`
+- La suite Playwright complete a ete reexecutee avec succes sur la production apres publication.
