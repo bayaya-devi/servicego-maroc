@@ -2,6 +2,7 @@
   "name": "servicego-maroc",
   "version": "1.0.0",
   "private": true,
+  "type": "module",
   "description": "ServiceGO - marketplace de services pour tout le Maroc",
   "scripts": {
     "dev": "wrangler dev --local --port 8787",

@@ -17,8 +17,9 @@ const state = {
   view: "home",
   selected: null,
   modal: null,
-  authMode: "login",
+  authMode: "register",
   pendingIntent: null,
+  pendingRoute: null,
   conversations: [],
   activeConversation: null,
   messages: [],
@@ -30,6 +31,7 @@ const state = {
   mapCategory: "all",
   mapMode: "2d",
   publicMenuOpen: false,
+  languageMenuOpen: false,
   legalTab: 0,
   geo: { country: "", region: "", city: "", source: "fallback" },
   publicPhotos: [],
@@ -146,11 +148,31 @@ function cityOptions(selected = "Rabat") {
 function brand() {
   return `<button class="brand" data-action="home" aria-label="Accueil ServiceGO"><span class="brand-symbol" aria-hidden="true"><img src="/assets/servicego-symbol.png" alt=""></span><strong>Service<span>GO</span></strong></button>`;
 }
+const routeForView = { map: "/app/carte", messages: "/app/messages", profile: "/app/profil", admin: "/app/admin" };
+const viewForRoute = Object.fromEntries(Object.entries(routeForView).map(([view, route]) => [route, view]));
+function icon(name) {
+  const paths = {
+    home: '<path d="M3 11.5 12 4l9 7.5"/><path d="M5.5 10.5V20h13v-9.5"/><path d="M9.5 20v-6h5v6"/>',
+    user: '<circle cx="12" cy="8" r="4"/><path d="M4.5 21a7.5 7.5 0 0 1 15 0"/>',
+    messages: '<path d="M5 18.5 3.5 22l4.5-2h9a4 4 0 0 0 4-4V7a4 4 0 0 0-4-4H7a4 4 0 0 0-4 4v7.5a4 4 0 0 0 2 3.5Z"/><path d="M8 9h8M8 13h5"/>',
+    language: '<circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3a15 15 0 0 1 0 18M12 3a15 15 0 0 0 0 18"/>',
+    faq: '<circle cx="12" cy="12" r="9"/><path d="M9.8 9a2.4 2.4 0 1 1 3.5 2.1c-.8.4-1.3 1-1.3 1.9v.4"/><path d="M12 17h.01"/>',
+    legal: '<path d="M6 3h9l4 4v14H6z"/><path d="M15 3v5h4M9 12h6M9 16h6"/>',
+    settings: '<circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.9l.1.1-2.8 2.8-.1-.1a1.7 1.7 0 0 0-1.9-.3 1.7 1.7 0 0 0-1 1.6v.2h-4V21a1.7 1.7 0 0 0-1-1.6 1.7 1.7 0 0 0-1.9.3l-.1.1L4.2 17l.1-.1a1.7 1.7 0 0 0 .3-1.9A1.7 1.7 0 0 0 3 14H2.8v-4H3a1.7 1.7 0 0 0 1.6-1 1.7 1.7 0 0 0-.3-1.9L4.2 7 7 4.2l.1.1A1.7 1.7 0 0 0 9 4.6 1.7 1.7 0 0 0 10 3v-.2h4V3a1.7 1.7 0 0 0 1 1.6 1.7 1.7 0 0 0 1.9-.3l.1-.1L19.8 7l-.1.1a1.7 1.7 0 0 0-.3 1.9 1.7 1.7 0 0 0 1.6 1h.2v4H21a1.7 1.7 0 0 0-1.6 1Z"/>',
+    plus: '<path d="M12 5v14M5 12h14"/>',
+    minus: '<path d="M5 12h14"/>',
+    send: '<path d="m3 11 18-8-8 18-2-8z"/><path d="m11 13 10-10"/>',
+  };
+  return `<svg class="sg-icon" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">${paths[name] || paths.plus}</svg>`;
+}
+function languageMenu() {
+  if (!state.languageMenuOpen) return "";
+  return `<div class="language-nucleus" role="menu" aria-label="Langue"><button data-action="set-locale" data-locale="fr" role="menuitem" lang="fr">FR <span>Français</span></button><button data-action="set-locale" data-locale="en" role="menuitem" lang="en">EN <span>English</span></button><button data-action="set-locale" data-locale="ar" role="menuitem" lang="ar">AR <span>العربية</span></button></div>`;
+}
 function header() {
   const signedIn = Boolean(state.user);
-  const locale = `<label class="sr-only" for="locale">Langue</label><select id="locale" class="locale-select" data-action="locale" aria-label="Langue"><option value="fr" ${state.locale === "fr" ? "selected" : ""}>FR</option><option value="en" ${state.locale === "en" ? "selected" : ""}>EN</option><option value="ar" ${state.locale === "ar" ? "selected" : ""}>AR</option></select>`;
-  if (!signedIn) return `<header class="public-nucleus ${state.publicMenuOpen ? "is-expanded" : ""}"><nav aria-label="Navigation principale"><button class="nucleus-icon" data-action="home" aria-label="Accueil" data-label="Accueil"><span aria-hidden="true">⌂</span></button><button class="nucleus-icon profile-icon" data-action="open-auth" aria-label="Connexion" data-label="Connexion"><span class="profile-glyph" aria-hidden="true"></span></button><span class="nucleus-secondary" aria-hidden="${!state.publicMenuOpen}"><button class="nucleus-icon language-icon" data-action="cycle-locale" aria-label="Langue" data-label="Langue" tabindex="${state.publicMenuOpen ? "0" : "-1"}">A/文</button><button class="nucleus-icon" data-action="open-faq" aria-label="Questions fréquentes" data-label="Questions fréquentes" tabindex="${state.publicMenuOpen ? "0" : "-1"}">?</button><button class="nucleus-icon" data-action="open-legal" aria-label="Informations légales" data-label="Informations légales" tabindex="${state.publicMenuOpen ? "0" : "-1"}">▤</button><button class="nucleus-icon" data-action="open-contact" aria-label="Contact" data-label="Contact" tabindex="${state.publicMenuOpen ? "0" : "-1"}">✉</button></span><button class="nucleus-icon plus ${state.publicMenuOpen ? "active" : ""}" data-action="toggle-public-menu" aria-label="${state.publicMenuOpen ? "Fermer" : "Plus"}" aria-expanded="${state.publicMenuOpen}" data-label="${state.publicMenuOpen ? "Fermer" : "Plus"}">${state.publicMenuOpen ? "−" : "+"}</button></nav></header>`;
-  return `<header class="topbar member-nucleus">${brand()}<nav class="top-actions" aria-label="Navigation principale"><button class="nav-button ${state.view === "map" ? "active" : ""}" data-action="view" data-view="map">Carte</button><button class="nav-button ${state.view === "messages" ? "active" : ""}" data-action="view" data-view="messages">Messages</button><button class="nav-button ${state.view === "profile" ? "active" : ""}" data-action="view" data-view="profile">Profil</button>${state.user.is_admin ? `<button class="nav-button ${state.view === "admin" ? "active" : ""}" data-action="view" data-view="admin">Admin</button>` : ""}<button class="quick-trigger" data-action="open-quick" aria-label="Actions rapides">C+</button>${locale}</nav></header>`;
+  if (!signedIn) return `<header class="public-nucleus ${state.publicMenuOpen ? "is-expanded" : ""}"><nav aria-label="Navigation principale"><button class="nucleus-icon" data-action="home" aria-label="Accueil" data-label="Accueil">${icon("home")}</button><button class="nucleus-icon" data-action="open-auth" aria-label="Connexion / Inscription" data-label="Connexion / Inscription">${icon("user")}</button><span class="nucleus-secondary" aria-hidden="${!state.publicMenuOpen}"><button class="nucleus-icon" data-action="open-language" aria-label="Langue" data-label="Langue" tabindex="${state.publicMenuOpen ? "0" : "-1"}">${icon("language")}</button><button class="nucleus-icon" data-action="open-faq" aria-label="Questions fréquentes" data-label="Questions fréquentes" tabindex="${state.publicMenuOpen ? "0" : "-1"}">${icon("faq")}</button><button class="nucleus-icon" data-action="open-legal" aria-label="Informations légales et contact" data-label="Informations légales et contact" tabindex="${state.publicMenuOpen ? "0" : "-1"}">${icon("legal")}</button></span><button class="nucleus-icon plus" data-action="toggle-public-menu" aria-label="${state.publicMenuOpen ? "Fermer" : "Plus"}" aria-expanded="${state.publicMenuOpen}" data-label="${state.publicMenuOpen ? "Fermer" : "Plus"}">${icon(state.publicMenuOpen ? "minus" : "plus")}</button></nav>${languageMenu()}</header>`;
+  return `<header class="public-nucleus member-nucleus ${state.publicMenuOpen ? "is-expanded" : ""}"><nav aria-label="Navigation principale"><button class="nucleus-icon ${state.view === "map" ? "active" : ""}" data-action="view" data-view="map" aria-label="Accueil" data-label="Accueil">${icon("home")}</button><button class="nucleus-icon ${state.view === "messages" ? "active" : ""}" data-action="view" data-view="messages" aria-label="Messages" data-label="Messages">${icon("messages")}</button><button class="nucleus-icon ${state.view === "profile" ? "active" : ""}" data-action="view" data-view="profile" aria-label="Profil" data-label="Profil">${icon("user")}</button><span class="nucleus-secondary member-secondary" aria-hidden="${!state.publicMenuOpen}"><button class="nucleus-icon" data-action="open-legal" aria-label="Informations légales et contact" data-label="Informations légales et contact" tabindex="${state.publicMenuOpen ? "0" : "-1"}">${icon("legal")}</button></span><button class="nucleus-icon plus" data-action="toggle-public-menu" aria-label="${state.publicMenuOpen ? "Fermer" : "Plus"}" aria-expanded="${state.publicMenuOpen}" data-label="${state.publicMenuOpen ? "Fermer" : "Plus"}">${icon(state.publicMenuOpen ? "minus" : "plus")}</button></nav></header>`;
 }
 function staticBubble(kind, label, position, urgent = false) {
   return `<span class="map-bubble ${kind} ${urgent ? "urgent" : ""}" style="${position}">${escape(label)}</span>`;
@@ -163,7 +185,7 @@ function homeView() {
   const alt = (photo) => escape(photo.alt[state.locale] || photo.alt.fr);
   const credit = [...new Set(photos.map((photo) => photo.credit))].join(" · ");
   const characters = `<div class="character-stage" aria-label="Les deux personnages ServiceGO se rencontrent"><img class="character blue-character" src="/assets/servicego-character-blue.svg" alt=""><span class="meeting-light" aria-hidden="true"></span><img class="character green-character" src="/assets/servicego-character-green.svg" alt=""></div>`;
-  return `<main id="main-content" class="story-v21" tabindex="-1" style="--photo-one:url('${first.resolutions.large}');--photo-two:url('${second.resolutions.large}')"><div class="story-scroll" aria-hidden="true"><span id="moment-one"></span><span id="possibilities"></span><span id="moment-three"></span></div><div class="story-viewport"><div class="story-photo photo-one" role="img" aria-label="${alt(first)}"></div><div class="story-photo photo-two" role="img" aria-label="${alt(second)}"></div><div class="story-light" aria-hidden="true"></div><section class="narrative moment-one" aria-labelledby="story-title"><div class="discovery-copy"><h1 id="story-title"><span>Un besoin.</span><span>Une personne.</span><span>Une solution.</span></h1><button class="urgent-help-cta" data-action="urgent-request" aria-label="J'ai besoin d'aide maintenant"><span class="urgent-help-icon" aria-hidden="true">⚡</span><span>J'ai besoin d'aide maintenant</span></button></div><div class="device-perspective"><div class="smartphone" aria-label="Aperçu fictif de ServiceGO"><div class="phone-frame"><div class="phone-speaker" aria-hidden="true"></div><div class="phone-screen"><div class="phone-status" aria-hidden="true"><span>9:41</span><span>● ● ▰</span></div><div id="marketing-map" class="marketing-map" aria-label="Carte géographique fictive"><div class="marketing-pins">${staticBubble("need", "Fuite", "left:38%;top:42%", true)}${staticBubble("help", "Peinture", "left:62%;top:28%")}${staticBubble("need", "Livraison", "left:58%;top:62%")}${staticBubble("help", "Ménage", "left:34%;top:73%")}</div></div></div><span class="phone-reflection" aria-hidden="true"></span></div></div></div><button class="discover-arrow" data-action="discover" aria-label="Découvrir"><span aria-hidden="true">↓</span></button></section><section class="narrative moment-two" aria-labelledby="possibility-title"><div class="story-content"><h2 id="possibility-title">Deux possibilités. Un seul compte.</h2>${characters}<div class="possibility-actions"><button class="possibility need" data-action="open-auth" data-intent="request"><span>Je demande</span></button><button class="possibility offer" data-action="open-auth" data-intent="offer"><span>Je propose</span></button></div></div></section><section class="narrative moment-three" aria-labelledby="conclusion-title"><div class="story-content">${characters}<h2 id="conclusion-title">L'entraide commence ici.</h2><button class="button large join" data-action="open-auth">Rejoindre ServiceGO</button><p class="photo-credit">${translate(state.locale, "Photos :")} ${escape(credit)} · Unsplash</p></div></section></div></main><button class="back-to-top" data-action="back-top" aria-label="Retour en haut">↑</button>`;
+  return `<main id="main-content" class="story-v21" tabindex="-1" style="--photo-one:url('${first.resolutions.large}');--photo-two:url('${second.resolutions.large}')"><div class="story-scroll" aria-hidden="true"><span id="moment-one"></span><span id="possibilities"></span><span id="moment-three"></span></div><div class="story-viewport"><div class="story-photo photo-one" role="img" aria-label="${alt(first)}"></div><div class="story-photo photo-two" role="img" aria-label="${alt(second)}"></div><div class="story-light" aria-hidden="true"></div><section class="narrative moment-one" aria-labelledby="story-title"><div class="discovery-copy"><h1 id="story-title"><span>Un besoin.</span><span>Une personne.</span><span>Une solution.</span></h1><button class="urgent-help-cta" data-action="urgent-request" aria-label="J'ai besoin d'aide maintenant"><span class="urgent-help-icon" aria-hidden="true">⚡</span><span>J'ai besoin d'aide maintenant</span></button></div><div class="device-perspective"><div class="smartphone" aria-label="Aperçu fictif de ServiceGO"><div class="phone-frame"><div class="phone-speaker" aria-hidden="true"></div><div class="phone-screen"><div class="phone-status" aria-hidden="true"><span>9:41</span><span>● ● ▰</span></div><div id="marketing-map" class="marketing-map" aria-label="Carte géographique fictive"></div></div><span class="phone-reflection" aria-hidden="true"></span></div></div></div><button class="discover-arrow" data-action="discover" aria-label="Découvrir"><span aria-hidden="true">↓</span></button></section><section class="narrative moment-two" aria-labelledby="possibility-title"><div class="story-content"><h2 id="possibility-title">Deux possibilités. Un seul compte.</h2>${characters}<div class="possibility-actions"><button class="possibility need" data-action="open-auth" data-intent="request"><span>Je demande</span></button><button class="possibility offer" data-action="open-auth" data-intent="offer"><span>Je propose</span></button></div></div></section><section class="narrative moment-three" aria-labelledby="conclusion-title"><div class="story-content">${characters}<h2 id="conclusion-title">L'entraide commence ici.</h2><button class="button large join" data-action="open-auth">Rejoindre ServiceGO</button><p class="photo-credit">${translate(state.locale, "Photos :")} ${escape(credit)} · Unsplash</p></div></section></div></main><button class="back-to-top" data-action="back-top" aria-label="Retour en haut">↑</button>`;
 }
 function mapBubbles() {
   const entries = [
@@ -277,10 +299,7 @@ function selectedItem() {
   return `<p class="eyebrow">${translate(state.locale, request ? "Demande" : "Service disponible")}</p><h2>${escape(item.title)}</h2><span class="badge">${escape(translate(state.locale, item.category_name || "Service"))} - ${escape(item.district)}</span>${photo}<div class="detail-meta"><strong>${escape(identity || translate(state.locale, "Utilisateur ServiceGO"))}</strong><br>${escape(item.description)}${item.budget_hint || item.price_hint ? `<br><br>${translate(state.locale, request ? "Budget" : "Prix")} : ${escape(item.budget_hint || item.price_hint)}` : ""}</div><div class="detail-actions">${actions}</div>`;
 }
 function mapView() {
-  return `<main id="main-content" class="workspace ${state.mapMode === "relief" ? "relief" : ""}" tabindex="-1"><aside class="panel actions-panel"><div><p class="eyebrow">Connecté</p><h2>Que voulez-vous faire ?</h2></div><button class="choice" data-action="open-request"><span class="choice-icon">?</span><span><strong>Demander</strong><small>Publier un besoin</small></span></button><button class="choice green-choice" data-action="open-service"><span class="choice-icon">+</span><span><strong>Proposer</strong><small>Rendre un service visible</small></span></button><div class="legend"><span><i class="dot blue"></i> Demandes</span><span><i class="dot orange"></i> Services</span><span><i class="dot mint"></i> Mise en relation</span></div></aside><section class="panel map-panel"><div class="map-toolbar"><span><strong>Services autour de vous</strong><small>Les positions affichées sont approximatives.</small></span><div class="map-controls"><div class="segmented" aria-label="Type de bulle"><button class="${state.mapFilter === "all" ? "active" : ""}" data-action="filter-map" data-value="all">Tout</button><button class="${state.mapFilter === "request" ? "active" : ""}" data-action="filter-map" data-value="request">Demandes</button><button class="${state.mapFilter === "service" ? "active" : ""}" data-action="filter-map" data-value="service">Services</button></div><select data-action="filter-category" aria-label="Catégorie"><option value="all">Toutes les catégories</option>${categoryOptions(state.mapCategory)}</select><div class="segmented" aria-label="Mode de carte"><button class="${state.mapMode === "2d" ? "active" : ""}" data-action="map-mode" data-value="2d">2D</button><button class="${state.mapMode === "relief" ? "active" : ""}" data-action="map-mode" data-value="relief">Relief</button></div></div></div><div id="liveMap" class="real-map" aria-label="Carte interactive du Maroc"></div></section><aside class="panel selection">${selectedItem()}<details class="accessible-list"><summary>Liste accessible</summary>${accessibleMapList()}</details></aside></main>${mobileTabs()}<button class="info-button" data-action="open-info" aria-label="Informations">i</button>`;
-}
-function mobileTabs() {
-  return `<nav class="mobile-tabbar" aria-label="Navigation principale"><button class="${state.view === "map" ? "active" : ""}" data-action="view" data-view="map">Carte</button><button class="${state.view === "messages" ? "active" : ""}" data-action="view" data-view="messages">Messages</button><button class="mobile-quick" data-action="open-quick" aria-label="Actions rapides">C+</button><button class="${state.view === "profile" ? "active" : ""}" data-action="view" data-view="profile">Profil</button></nav>`;
+  return `<main id="main-content" class="workspace" tabindex="-1"><aside class="panel actions-panel"><div><p class="eyebrow">Connecté</p><h2>Que voulez-vous faire ?</h2></div><div class="action-choices"><button class="choice" data-action="open-request"><span class="choice-icon">?</span><span><strong>Demander</strong><small>Publier un besoin</small></span></button><button class="choice green-choice" data-action="open-service"><span class="choice-icon">+</span><span><strong>Proposer</strong><small>Rendre un service visible</small></span></button></div></aside><section class="map-panel"><div id="liveMap" class="real-map" aria-label="Carte interactive du Maroc"></div></section><aside class="panel selection">${selectedItem()}<details class="accessible-list"><summary>Liste accessible</summary>${accessibleMapList()}</details></aside></main>`;
 }
 function messagesView() {
   const current = state.conversations.find(
@@ -295,9 +314,9 @@ function messagesView() {
         .join("")
     : `<div class="loading">Vos discussions apparaîtront ici.</div>`;
   const chat = current
-    ? `<section class="chat"><div class="chat-title">${escape(current.other_name)} <small>${escape(current.request_title || "Discussion")}</small></div><div class="message-list">${state.messages.length ? state.messages.map((message) => `<div class="message ${message.sender_id === state.user.id ? "mine" : ""}">${escape(message.body)}<small>${escape(message.sender_name)}</small></div>`).join("") : `<p class="page-lead">Dites bonjour pour commencer.</p>`}</div><form class="message-form" data-form="message"><input name="body" maxlength="2000" placeholder="Écrire un message" required /><button class="button icon" aria-label="Envoyer">></button></form></section>`
+    ? `<section class="chat"><div class="chat-title">${escape(current.other_name)} <small>${escape(current.request_title || "Discussion")}</small></div><div class="message-list">${state.messages.length ? state.messages.map((message) => `<div class="message ${message.sender_id === state.user.id ? "mine" : ""}">${escape(message.body)}<small>${escape(message.sender_name)}</small></div>`).join("") : `<p class="page-lead">Dites bonjour pour commencer.</p>`}</div><form class="message-form" data-form="message"><input name="body" maxlength="2000" placeholder="Écrire un message" required /><button class="button icon" aria-label="Envoyer">${icon("send")}</button></form></section>`
     : `<section class="chat"><div class="loading">Choisissez une discussion.</div></section>`;
-  return `<main class="view-page"><p class="eyebrow">Messages</p><h1>Vos discussions</h1><p class="page-lead">Après une réponse acceptée ou une demande directe, la discussion s'ouvre ici.</p><div class="panel messages-layout"><aside class="conversation-list">${list}</aside>${chat}</div></main>${mobileTabs()}`;
+  return `<main id="main-content" class="view-page member-page messages-page" tabindex="-1"><div class="page-heading"><p class="eyebrow">Messages</p><h1>Vos discussions</h1><p class="page-lead">Après une réponse acceptée ou une demande directe, la discussion s'ouvre ici.</p></div><div class="panel messages-layout"><aside class="conversation-list">${list}</aside>${chat}</div></main>`;
 }
 function profileView() {
   const user = state.user;
@@ -320,19 +339,19 @@ function profileView() {
   const admin = user.is_admin
     ? `<section class="panel profile-box"><h3>Administration</h3><p>${state.adminStats ? `${state.adminStats.users} ${translate(state.locale, "comptes")}<br>${state.adminStats.open_requests} ${translate(state.locale, "demandes ouvertes")}<br>${state.adminStats.active_services} ${translate(state.locale, "services visibles")}` : "Chargement des statistiques…"}</p></section>`
     : "";
-  return `<main class="view-page"><p class="eyebrow">Profil unique</p><h1>Votre compte ServiceGO</h1><p class="page-lead">Ici, vous êtes libre de demander et de proposer.</p><div class="profile-grid"><section class="panel profile-box profile-main"><div class="avatar">${escape(user.full_name.charAt(0).toUpperCase())}</div><h3>${escape(user.full_name)}</h3><p>${escape(user.email)}<br>${escape(user.district)}</p>${user.email_verified ? `<small>Adresse e-mail confirmée</small>` : `<p><small>Adresse e-mail à confirmer</small><br><button class="text-button" data-action="resend-verification">Renvoyer le lien</button></p>`}<button class="button secondary" style="margin-top:16px" data-action="open-profile">Modifier</button></section><section class="panel profile-box"><h3>Mes besoins</h3><ul class="profile-list">${requestItems}</ul></section><section class="panel profile-box"><h3>Mes services</h3><ul class="profile-list">${serviceItems}</ul></section><section class="panel profile-box"><h3>Confiance</h3><p>${Number(user.rating || 5).toFixed(1)} / 5<br>${user.review_count || 0} ${translate(state.locale, "avis")}</p></section>${admin}</div></main>${mobileTabs()}`;
+  return `<main id="main-content" class="view-page member-page profile-page" tabindex="-1"><div class="page-heading profile-heading"><div><p class="eyebrow">Profil unique</p><h1>Votre compte ServiceGO</h1><p class="page-lead">Ici, vous êtes libre de demander et de proposer.</p></div><button class="nucleus-icon profile-settings" data-action="open-settings" aria-label="Paramètres" data-label="Paramètres">${icon("settings")}</button></div><div class="profile-grid"><section class="panel profile-box profile-main"><div class="avatar">${escape(user.full_name.charAt(0).toUpperCase())}</div><h3>${escape(user.full_name)}</h3><p>${escape(user.email)}<br>${escape(user.district)}</p>${user.email_verified ? `<small>Adresse e-mail confirmée</small>` : `<p><small>Adresse e-mail à confirmer</small><br><button class="text-button" data-action="resend-verification">Renvoyer le lien</button></p>`}<div class="profile-actions"><button class="button secondary" data-action="open-profile">Modifier</button><button class="button outline" data-action="logout">Se déconnecter</button></div></section><section class="panel profile-box"><h3>Mes besoins</h3><ul class="profile-list">${requestItems}</ul></section><section class="panel profile-box"><h3>Mes services</h3><ul class="profile-list">${serviceItems}</ul></section><section class="panel profile-box"><h3>Confiance</h3><p>${Number(user.rating || 5).toFixed(1)} / 5<br>${user.review_count || 0} ${translate(state.locale, "avis")}</p></section>${admin}</div></main>`;
 }
 function adminView() {
   const stats = state.adminStats || {};
-  return `<main id="main-content" class="view-page" tabindex="-1"><p class="eyebrow">Administration</p><h1>Tableau de bord</h1><p class="page-lead">Vue réservée aux administrateurs ServiceGO.</p><div class="stats-grid"><section class="panel"><strong>${Number(stats.users || 0)}</strong><span>Utilisateurs</span></section><section class="panel"><strong>${Number(stats.open_requests || 0)}</strong><span>Demandes ouvertes</span></section><section class="panel"><strong>${Number(stats.active_services || 0)}</strong><span>Services actifs</span></section><section class="panel"><strong>${Number(stats.conversations || 0)}</strong><span>Conversations</span></section></div></main>${mobileTabs()}<button class="info-button" data-action="open-info" aria-label="Informations">i</button>`;
+  return `<main id="main-content" class="view-page member-page" tabindex="-1"><p class="eyebrow">Administration</p><h1>Tableau de bord</h1><p class="page-lead">Vue réservée aux administrateurs ServiceGO.</p><div class="stats-grid"><section class="panel"><strong>${Number(stats.users || 0)}</strong><span>Utilisateurs</span></section><section class="panel"><strong>${Number(stats.open_requests || 0)}</strong><span>Demandes ouvertes</span></section><section class="panel"><strong>${Number(stats.active_services || 0)}</strong><span>Services actifs</span></section><section class="panel"><strong>${Number(stats.conversations || 0)}</strong><span>Conversations</span></section></div></main>`;
 }
 function authModal() {
   const register = state.authMode === "register";
   const forgot = state.authMode === "forgot";
   const country = state.geo.country || "MA";
   const codes = [["MA","+212"],["FR","+33"],["ES","+34"],["GB","+44"],["US","+1"],["DE","+49"],["AE","+971"],["IN","+91"]];
-  if (forgot) return `<div class="modal-layer"><section class="modal public-modal auth-modal"><button class="button icon outline close" data-action="close-modal" aria-label="Fermer">×</button><p class="eyebrow">ServiceGO</p><h2>Mot de passe oublié ?</h2><p class="modal-intro">Indiquez l'adresse utilisée pour votre compte.</p><form class="form-grid" data-form="forgot"><label class="field full"><span>E-mail</span><input name="email" type="email" autocomplete="email" required /></label><button class="button submit" type="submit">Envoyer le lien</button></form><button class="text-button auth-back" data-action="auth-tab" data-mode="login">Retour à la connexion</button></section></div>`;
-  return `<div class="modal-layer"><section class="modal public-modal auth-modal"><button class="button icon outline close" data-action="close-modal" aria-label="Fermer">×</button><p class="eyebrow">ServiceGO</p><h2>${register ? "Créez votre compte" : "Bon retour"}</h2><div class="modal-tabs"><button class="${!register ? "active" : ""}" data-action="auth-tab" data-mode="login">Se connecter</button><button class="${register ? "active" : ""}" data-action="auth-tab" data-mode="register">Créer un compte</button></div><form class="form-grid" data-form="auth">${register ? `<label class="field"><span>Prénom</span><input name="first_name" autocomplete="given-name" minlength="1" maxlength="40" required /></label><label class="field"><span>Nom</span><input name="last_name" autocomplete="family-name" minlength="1" maxlength="40" required /></label>` : ""}<label class="field full"><span>E-mail</span><input name="email" type="email" autocomplete="email" required /></label>${register ? `<div class="phone-field full"><label class="field dial-code"><span>Indicatif</span><select name="dial_code" aria-label="Indicatif international">${codes.map(([iso,code])=>`<option value="${code}" ${iso===country?"selected":""}>${iso} ${code}</option>`).join("")}</select></label><label class="field phone-number"><span>Téléphone</span><input name="phone_number" maxlength="24" inputmode="tel" autocomplete="tel-national" placeholder="6 12 34 56 78" required /></label></div>` : ""}<label class="field full password-field"><span>Mot de passe</span><span class="password-input"><input name="password" type="${state.passwordVisible ? "text" : "password"}" autocomplete="${register ? "new-password" : "current-password"}" minlength="8" required /><button type="button" data-action="toggle-password" aria-label="${state.passwordVisible ? "Masquer le mot de passe" : "Afficher le mot de passe"}">${state.passwordVisible ? "◉" : "○"}</button></span></label>${!register ? `<button type="button" class="text-button forgot-link" data-action="auth-tab" data-mode="forgot">Mot de passe oublié ?</button>` : ""}<button class="button submit" type="submit">${register ? "Créer mon compte" : "Se connecter"}</button></form><p class="form-note">Un seul compte pour demander un service et proposer votre aide.</p></section></div>`;
+  if (forgot) return `<div class="modal-layer"><section class="modal public-modal auth-modal"><button class="button icon outline close" data-action="close-modal" aria-label="Fermer">×</button><p class="eyebrow">ServiceGO</p><h2>Mot de passe oublié ?</h2><p class="modal-intro">Indiquez l'adresse utilisée pour votre compte.</p><form class="form-grid" data-form="forgot"><label class="field full"><span>E-mail</span><input name="email" type="email" autocomplete="email" placeholder="nom@exemple.com" required /></label><button class="button submit" type="submit">Envoyer le lien</button></form><button class="text-button auth-back" data-action="auth-tab" data-mode="login">Retour à la connexion</button></section></div>`;
+  return `<div class="modal-layer"><section class="modal public-modal auth-modal"><button class="button icon outline close" data-action="close-modal" aria-label="Fermer">×</button><p class="eyebrow">ServiceGO</p><h2>${register ? "Créez votre compte" : "Bon retour"}</h2><div class="modal-tabs"><button class="${register ? "active" : ""}" data-action="auth-tab" data-mode="register">Créer un compte</button><button class="${!register ? "active" : ""}" data-action="auth-tab" data-mode="login">Se connecter</button></div><form class="form-grid" data-form="auth">${register ? `<label class="field"><span>Prénom</span><input name="first_name" autocomplete="given-name" minlength="1" maxlength="40" placeholder="Votre prénom" required /></label><label class="field"><span>Nom</span><input name="last_name" autocomplete="family-name" minlength="1" maxlength="40" placeholder="Votre nom" required /></label>` : ""}<label class="field full"><span>E-mail</span><input name="email" type="email" autocomplete="email" placeholder="nom@exemple.com" required /></label>${register ? `<div class="phone-field full"><label class="field dial-code"><span>Indicatif</span><select name="dial_code" aria-label="Indicatif international">${codes.map(([iso,code])=>`<option value="${code}" ${iso===country?"selected":""}>${iso} ${code}</option>`).join("")}</select></label><label class="field phone-number"><span>Téléphone</span><input name="phone_number" maxlength="24" inputmode="tel" autocomplete="tel-national" placeholder="6 12 34 56 78" required /></label></div>` : ""}<label class="field full password-field"><span>Mot de passe</span><span class="password-input"><input name="password" type="${state.passwordVisible ? "text" : "password"}" autocomplete="${register ? "new-password" : "current-password"}" minlength="8" placeholder="8 caractères minimum" required /><button type="button" data-action="toggle-password" aria-label="${state.passwordVisible ? "Masquer le mot de passe" : "Afficher le mot de passe"}">${state.passwordVisible ? "◉" : "○"}</button></span></label>${!register ? `<button type="button" class="text-button forgot-link" data-action="auth-tab" data-mode="forgot">Mot de passe oublié ?</button>` : ""}<button class="button submit" type="submit">${register ? "Créer mon compte" : "Se connecter"}</button></form><p class="form-note">Un seul compte pour demander un service et proposer votre aide.</p></section></div>`;
 }
 function requestModal() {
   return `<div class="modal-layer"><section class="modal"><button class="button icon outline close" data-action="close-modal" aria-label="Fermer">×</button><p class="eyebrow">Demander</p><h2>Quel besoin avez-vous ?</h2><form class="form-grid" data-form="request"><label class="field"><span>Service</span><select name="category_id" required>${categoryOptions()}</select></label><label class="field"><span>Ville</span><select name="district">${cityOptions()}</select></label><label class="field full"><span>Titre court</span><input name="title" maxlength="100" placeholder="Ex. : fuite sous l'évier" required /></label><label class="field full"><span>Expliquez simplement</span><textarea name="description" maxlength="1200" placeholder="Décrivez ce qui doit être fait et précisez quand." required></textarea></label><label class="field"><span>Budget (facultatif)</span><input name="budget_hint" maxlength="80" placeholder="Ex. : 150 à 250 DH" /></label><label class="field"><span>Urgence</span><select name="urgency"><option value="normal">Normale</option><option value="urgent">Urgente</option></select></label><label class="field full"><span>Photo (facultative)</span><input type="file" name="photo" accept="image/*" /></label><button class="button submit" type="submit">Publier sur la carte</button></form></section></div>`;
@@ -351,6 +370,9 @@ function directModal() {
 function profileModal() {
   const user = state.user;
   return `<div class="modal-layer"><section class="modal"><button class="button icon outline close" data-action="close-modal" aria-label="Fermer">×</button><p class="eyebrow">Profil</p><h2>Vos informations</h2><form class="form-grid" data-form="profile"><label class="field full"><span>Prénom et nom</span><input name="full_name" value="${escape(user.full_name)}" maxlength="80" required /></label><label class="field"><span>Téléphone</span><input name="phone" value="${escape(user.phone || "")}" maxlength="30" /></label><label class="field"><span>Ville</span><select name="district">${cityOptions(user.district)}</select></label><label class="field full"><span>Quelques mots sur vous</span><textarea name="bio" maxlength="500">${escape(user.bio || "")}</textarea></label><label class="field full"><span>Nouvelle adresse e-mail</span><input name="new_email" type="email" autocomplete="email" placeholder="${translate(state.locale, "Laissez ce champ vide pour conserver")} ${escape(user.email)}" /></label><label class="field"><span>Mot de passe actuel</span><input name="current_password" type="password" autocomplete="current-password" /></label><label class="field"><span>Nouveau mot de passe</span><input name="new_password" type="password" minlength="8" autocomplete="new-password" /></label><button class="button submit" type="submit">Enregistrer</button></form></section></div>`;
+}
+function settingsModal() {
+  return `<div class="modal-layer"><section class="modal public-modal settings-modal"><button class="button icon outline close" data-action="close-modal" aria-label="Fermer">×</button><p class="eyebrow">ServiceGO</p><h2>Paramètres</h2><section class="settings-section"><h3>Langue</h3><div class="settings-languages" role="group" aria-label="Langue"><button class="${state.locale === "fr" ? "active" : ""}" data-action="set-locale" data-locale="fr">Français</button><button class="${state.locale === "en" ? "active" : ""}" data-action="set-locale" data-locale="en">English</button><button class="${state.locale === "ar" ? "active" : ""}" data-action="set-locale" data-locale="ar">العربية</button></div></section><section class="settings-section"><h3>Compte</h3><button class="button secondary" data-action="open-profile">Modifier mes informations</button></section></section></div>`;
 }
 function offersModal() {
   const request = state.offers.request;
@@ -373,20 +395,13 @@ function faqModal() {
 }
 function legalModal() {
   const copy = {
-    fr: { eyebrow:"Informations publiques",title:"Cadre légal et confidentialité",labels:["Mentions légales","Conditions d'utilisation","Confidentialité","Cookies","Services","Contact"],texts:["Éditeur, adresse du siège et numéro d'immatriculation : informations à compléter par le propriétaire du projet.","La version contractuelle doit être validée et publiée avant la commercialisation complète.","ServiceGO limite la carte opérationnelle aux membres et affiche des positions approximatives. La politique complète reste à valider.","La session utilise un cookie HTTPOnly nécessaire à la connexion. Les informations complémentaires restent à préciser si d'autres outils sont ajoutés.","ServiceGO met en relation des personnes qui demandent ou proposent un service. Les conditions commerciales détaillées restent à valider.","Coordonnées publiques de contact : à compléter par le propriétaire du projet."] },
-    en: { eyebrow:"Public information",title:"Legal and privacy framework",labels:["Legal notice","Terms of use","Privacy","Cookies","Services","Contact"],texts:["Publisher, registered office and registration number: information to be completed by the project owner.","The contractual version must be approved and published before full commercial launch.","ServiceGO limits the operational map to members and displays approximate locations. The complete policy still requires approval.","The session uses an HTTPOnly cookie required for sign-in. Additional information must be added if other tools are introduced.","ServiceGO connects people requesting or offering a service. Detailed commercial terms still require approval.","Public contact details: to be completed by the project owner."] },
-    ar: { eyebrow:"معلومات عامة",title:"الإطار القانوني والخصوصية",labels:["الإشعار القانوني","شروط الاستخدام","الخصوصية","ملفات الارتباط","الخدمات","اتصل بنا"],texts:["الناشر وعنوان المقر ورقم التسجيل: معلومات يجب على مالك المشروع استكمالها.","يجب اعتماد النسخة التعاقدية ونشرها قبل الإطلاق التجاري الكامل.","تقصر ServiceGO الخريطة التشغيلية على الأعضاء وتعرض مواقع تقريبية. لا تزال السياسة الكاملة بحاجة إلى الاعتماد.","تستخدم الجلسة ملف ارتباط HTTPOnly ضروريا لتسجيل الدخول. يجب إضافة معلومات أخرى إذا أضيفت أدوات جديدة.","تربط ServiceGO بين الأشخاص الذين يطلبون خدمة أو يعرضونها. لا تزال الشروط التجارية التفصيلية بحاجة إلى الاعتماد.","بيانات الاتصال العامة: يجب على مالك المشروع استكمالها."] }
+    fr: { eyebrow:"Informations publiques",title:"Cadre légal et confidentialité",labels:["Mentions légales","Conditions d'utilisation","Confidentialité","Cookies","Services","Contact"],texts:["Éditeur, adresse du siège et numéro d'immatriculation : informations à compléter par le propriétaire du projet.","La version contractuelle doit être validée et publiée avant la commercialisation complète.","ServiceGO limite la carte opérationnelle aux membres et affiche des positions approximatives. La politique complète reste à valider.","La session utilise un cookie HTTPOnly nécessaire à la connexion. Les informations complémentaires restent à préciser si d'autres outils sont ajoutés.","ServiceGO met en relation des personnes qui demandent ou proposent un service. Les conditions commerciales détaillées restent à valider.","Pour toute question relative à ServiceGO, utilisez l'adresse de contact ci-dessous."] },
+    en: { eyebrow:"Public information",title:"Legal and privacy framework",labels:["Legal notice","Terms of use","Privacy","Cookies","Services","Contact"],texts:["Publisher, registered office and registration number: information to be completed by the project owner.","The contractual version must be approved and published before full commercial launch.","ServiceGO limits the operational map to members and displays approximate locations. The complete policy still requires approval.","The session uses an HTTPOnly cookie required for sign-in. Additional information must be added if other tools are introduced.","ServiceGO connects people requesting or offering a service. Detailed commercial terms still require approval.","For any question about ServiceGO, use the contact address below."] },
+    ar: { eyebrow:"معلومات عامة",title:"الإطار القانوني والخصوصية",labels:["الإشعار القانوني","شروط الاستخدام","الخصوصية","ملفات الارتباط","الخدمات","اتصل بنا"],texts:["الناشر وعنوان المقر ورقم التسجيل: معلومات يجب على مالك المشروع استكمالها.","يجب اعتماد النسخة التعاقدية ونشرها قبل الإطلاق التجاري الكامل.","تقصر ServiceGO الخريطة التشغيلية على الأعضاء وتعرض مواقع تقريبية. لا تزال السياسة الكاملة بحاجة إلى الاعتماد.","تستخدم الجلسة ملف ارتباط HTTPOnly ضروريا لتسجيل الدخول. يجب إضافة معلومات أخرى إذا أضيفت أدوات جديدة.","تربط ServiceGO بين الأشخاص الذين يطلبون خدمة أو يعرضونها. لا تزال الشروط التجارية التفصيلية بحاجة إلى الاعتماد.","لأي سؤال متعلق بـ ServiceGO، استخدم عنوان الاتصال أدناه."] }
   }[state.locale] || null;
   const active = Math.max(0, Math.min(copy.labels.length - 1, state.legalTab));
-  return `<div class="modal-layer"><section class="modal public-modal public-info-modal legal-modal"><button class="button icon outline close" data-action="close-modal" aria-label="Fermer">×</button><p class="eyebrow">${copy.eyebrow}</p><h2>${copy.title}</h2><nav class="legal-nav" aria-label="Rubriques légales">${copy.labels.map((label,index)=>`<button class="${index===active?"active":""}" data-action="legal-tab" data-index="${index}" aria-current="${index===active?"page":"false"}">${label}</button>`).join("")}</nav><div class="legal-content" aria-live="polite"><h3>${copy.labels[active]}</h3><p>${copy.texts[active]}</p></div></section></div>`;
-}
-function contactModal() {
-  const copy = {
-    fr: ["Nous contacter", "Une question, un signalement ou une demande concernant ServiceGO ?", "Nous écrire"],
-    en: ["Contact us", "A question, report or request about ServiceGO?", "Email us"],
-    ar: ["اتصل بنا", "هل لديك سؤال أو بلاغ أو طلب بخصوص ServiceGO؟", "راسلنا"],
-  }[state.locale];
-  return `<div class="modal-layer"><section class="modal public-modal contact-modal"><button class="button icon outline close" data-action="close-modal" aria-label="Fermer">×</button><p class="eyebrow">ServiceGO</p><h2>${copy[0]}</h2><p class="modal-intro">${copy[1]}</p><a class="contact-email" href="mailto:aetbconseil@gmail.com">aetbconseil@gmail.com</a><a class="button contact-action" href="mailto:aetbconseil@gmail.com?subject=ServiceGO">${copy[2]}</a></section></div>`;
+  const contactAction = active === 5 ? `<a class="contact-email" href="mailto:aetbconseil@gmail.com">aetbconseil@gmail.com</a><a class="button contact-action" href="mailto:aetbconseil@gmail.com?subject=ServiceGO">${translate(state.locale, "Nous écrire")}</a>` : "";
+  return `<div class="modal-layer"><section class="modal public-modal public-info-modal legal-modal"><button class="button icon outline close" data-action="close-modal" aria-label="Fermer">×</button><p class="eyebrow">${copy.eyebrow}</p><h2>${copy.title}</h2><nav class="legal-nav" aria-label="Rubriques légales">${copy.labels.map((label,index)=>`<button class="${index===active?"active":""}" data-action="legal-tab" data-index="${index}" aria-current="${index===active?"page":"false"}">${label}</button>`).join("")}</nav><div class="legal-content" aria-live="polite"><h3>${copy.labels[active]}</h3><p>${copy.texts[active]}</p>${contactAction}</div></section></div>`;
 }
 function modal() {
   if (!state.modal) return "";
@@ -396,12 +411,12 @@ function modal() {
   if (state.modal === "reply") return replyModal();
   if (state.modal === "direct") return directModal();
   if (state.modal === "profile") return profileModal();
+  if (state.modal === "settings") return settingsModal();
   if (state.modal === "offers") return offersModal();
   if (state.modal === "quick") return quickModal();
   if (state.modal === "info") return infoModal();
   if (state.modal === "faq") return faqModal();
   if (state.modal === "legal") return legalModal();
-  if (state.modal === "contact") return contactModal();
   return "";
 }
 function render() {
@@ -441,10 +456,19 @@ function initializeStory() {
   if (marketingMap) marketingMap.remove();
   const mapElement = document.querySelector("#marketing-map");
   if (mapElement) {
-    const centers = { MA: [33.4, -7.1, 5], FR: [46.4, 2.2, 5], ES: [40.2, -3.5, 5] };
-    const [lat, lng, zoom] = centers[state.geo.country] || [31, 4, 2];
+    const [lat, lng, zoom] = [32.45, -6.45, 5];
     marketingMap = Leaflet.map(mapElement, { center: [lat, lng], zoom, zoomControl: false, attributionControl: false, dragging: false, scrollWheelZoom: false, doubleClickZoom: false, keyboard: false, touchZoom: false });
     Leaflet.tileLayer(state.config.mapTileUrl, { attribution: state.config.mapAttribution, maxZoom: 18 }).addTo(marketingMap);
+    const previewMarkers = [
+      { position: cities.Rabat, label: "Fuite", kind: "need", urgent: true },
+      { position: cities.Casablanca, label: "Peinture", kind: "help" },
+      { position: cities.Fes, label: "Livraison", kind: "need" },
+      { position: cities.Marrakech, label: "Ménage", kind: "help" },
+    ];
+    for (const marker of previewMarkers) {
+      const markerIcon = Leaflet.divIcon({ className: "marketing-marker", html: `<span class="map-bubble ${marker.kind} ${marker.urgent ? "urgent" : ""}">${translate(state.locale, marker.label)}</span>`, iconSize: [88, 46], iconAnchor: [44, 38] });
+      Leaflet.marker(marker.position, { icon: markerIcon, interactive: false }).addTo(marketingMap);
+    }
   }
   updateStoryProgress();
 }
@@ -528,6 +552,24 @@ async function loadConversations(selectFirst = false) {
     state.messages = messages.messages;
   }
 }
+async function prepareView(view) {
+  if (view === "map") await loadMap();
+  if (view === "messages") await loadConversations(true);
+  if (view === "profile") {
+    await loadMine();
+    if (state.user?.is_admin) state.adminStats = (await api("/api/admin/overview")).stats;
+  }
+  if (view === "admin" && state.user?.is_admin) state.adminStats = (await api("/api/admin/overview")).stats;
+}
+async function navigateToView(view, { replace = false, renderNow = true } = {}) {
+  const target = routeForView[view] ? view : "map";
+  state.view = target;
+  state.selected = null;
+  await prepareView(target);
+  const method = replace ? "replaceState" : "pushState";
+  window.history[method]({ view: target }, "", routeForView[target]);
+  if (renderNow) render();
+}
 async function start() {
   try {
     const [data, config, context] = await Promise.all([
@@ -545,8 +587,15 @@ async function start() {
     state.publicPhotos = selectPhotoSet(state.geo.country);
     preloadPhotoSet(state.publicPhotos);
     if (state.user) {
-      state.view = "map";
-      await loadMap();
+      const requestedView = viewForRoute[window.location.pathname];
+      state.view = requestedView || "map";
+      await prepareView(state.view);
+      if (!requestedView) window.history.replaceState({ view: state.view }, "", routeForView[state.view]);
+    } else if (viewForRoute[window.location.pathname]) {
+      state.pendingRoute = viewForRoute[window.location.pathname];
+      state.authMode = "login";
+      state.modal = "auth";
+      window.history.replaceState({}, "", "/");
     }
     if (
       new URLSearchParams(window.location.search).get("email_verified") === "1"
@@ -571,9 +620,13 @@ app.addEventListener("click", async (event) => {
   const action = button.dataset.action;
   try {
     if (action === "home") {
-      state.view = "home";
-      state.selected = null;
-      render();
+      if (state.user) await navigateToView("map");
+      else {
+        state.view = "home";
+        state.selected = null;
+        window.history.pushState({ view: "home" }, "", "/");
+        render();
+      }
     }
     if (action === "preview-map")
       document
@@ -585,7 +638,7 @@ app.addEventListener("click", async (event) => {
     if (action === "open-auth") {
       modalReturnAction = action;
       state.pendingIntent = null;
-      state.authMode = "login";
+      state.authMode = "register";
       state.modal = "auth";
       render();
     }
@@ -595,6 +648,7 @@ app.addEventListener("click", async (event) => {
         if (!state.categories.length) await loadMap();
         state.view = "map";
         state.modal = "request";
+        window.history.replaceState({ view: "map" }, "", routeForView.map);
       } else {
         state.pendingIntent = "request";
         state.authMode = "register";
@@ -608,31 +662,28 @@ app.addEventListener("click", async (event) => {
     }
     if (action === "toggle-public-menu") {
       state.publicMenuOpen = !state.publicMenuOpen;
+      if (!state.publicMenuOpen) state.languageMenuOpen = false;
       render();
     }
-    if (action === "cycle-locale") {
-      const locales = ["fr", "en", "ar"];
-      state.locale = locales[(locales.indexOf(state.locale) + 1) % locales.length];
+    if (action === "open-language") {
+      state.languageMenuOpen = !state.languageMenuOpen;
+      render();
+    }
+    if (action === "set-locale") {
+      state.locale = button.dataset.locale;
       localStorage.setItem("servicego-locale", state.locale);
+      state.languageMenuOpen = false;
       render();
     }
     if (action === "open-faq") {
       modalReturnAction = action;
-      state.publicMenuOpen = false;
       state.modal = "faq";
       render();
     }
     if (action === "open-legal") {
       modalReturnAction = action;
-      state.publicMenuOpen = false;
       state.legalTab = 0;
       state.modal = "legal";
-      render();
-    }
-    if (action === "open-contact") {
-      modalReturnAction = action;
-      state.publicMenuOpen = false;
-      state.modal = "contact";
       render();
     }
     if (action === "open-info") {
@@ -654,7 +705,15 @@ app.addEventListener("click", async (event) => {
     }
     if (action === "legal-tab") {
       state.legalTab = Number(button.dataset.index || 0);
-      render();
+      const updated = document.createElement("div");
+      updated.innerHTML = legalModal();
+      const nextDialog = updated.querySelector(".legal-modal");
+      const currentDialog = document.querySelector(".legal-modal");
+      if (nextDialog && currentDialog) {
+        currentDialog.querySelector(".legal-nav").replaceWith(nextDialog.querySelector(".legal-nav"));
+        currentDialog.querySelector(".legal-content").replaceWith(nextDialog.querySelector(".legal-content"));
+        currentDialog.querySelector(`[data-index="${state.legalTab}"]`)?.focus();
+      }
     }
     if (action === "open-request") {
       state.modal = "request";
@@ -676,6 +735,11 @@ app.addEventListener("click", async (event) => {
       state.modal = "profile";
       render();
     }
+    if (action === "open-settings") {
+      modalReturnAction = action;
+      state.modal = "settings";
+      render();
+    }
     if (action === "resend-verification") {
       const data = await api("/api/auth/resend-verification", {
         method: "POST",
@@ -693,25 +757,12 @@ app.addEventListener("click", async (event) => {
         method: "POST",
       });
       state.modal = null;
-      state.view = "messages";
       state.activeConversation = data.conversation_id;
-      await loadConversations();
-      render();
+      await navigateToView("messages");
       notify("Réponse acceptée. La discussion est ouverte.");
     }
     if (action === "view") {
-      state.view = button.dataset.view;
-      state.selected = null;
-      if (state.view === "map") await loadMap();
-      if (state.view === "messages") await loadConversations(true);
-      if (state.view === "profile") {
-        await loadMine();
-        if (state.user.is_admin)
-          state.adminStats = (await api("/api/admin/overview")).stats;
-      }
-      if (state.view === "admin" && state.user.is_admin)
-        state.adminStats = (await api("/api/admin/overview")).stats;
-      render();
+      await navigateToView(button.dataset.view);
     }
     if (action === "filter-map") {
       state.mapFilter = button.dataset.value;
@@ -747,6 +798,9 @@ app.addEventListener("click", async (event) => {
       state.selected = null;
       state.modal = null;
       state.pendingIntent = null;
+      state.pendingRoute = null;
+      state.publicMenuOpen = false;
+      window.history.replaceState({}, "", "/");
       render();
       notify("Vous êtes déconnecté.");
     }
@@ -768,10 +822,27 @@ app.addEventListener("change", (event) => {
   }
 });
 document.addEventListener("click", (event) => {
-  if (state.publicMenuOpen && !event.target.closest(".public-nucleus")) {
-    state.publicMenuOpen = false;
+  if (state.languageMenuOpen && !event.target.closest(".public-nucleus")) {
+    state.languageMenuOpen = false;
     render();
   }
+});
+window.addEventListener("scroll", () => {
+  if (state.languageMenuOpen) {
+    state.languageMenuOpen = false;
+    render();
+  }
+}, { passive: true });
+window.addEventListener("popstate", async () => {
+  if (!state.user) {
+    state.view = "home";
+    render();
+    return;
+  }
+  const view = viewForRoute[window.location.pathname] || "map";
+  state.view = view;
+  await prepareView(view);
+  render();
 });
 document.addEventListener("keydown", (event) => {
   if (event.key === "Escape" && state.modal) {
@@ -780,10 +851,10 @@ document.addEventListener("keydown", (event) => {
     requestAnimationFrame(() => document.querySelector(`[data-action="${modalReturnAction}"]`)?.focus());
     return;
   }
-  if (event.key === "Escape" && state.publicMenuOpen) {
-    state.publicMenuOpen = false;
+  if (event.key === "Escape" && state.languageMenuOpen) {
+    state.languageMenuOpen = false;
     render();
-    requestAnimationFrame(() => document.querySelector('[data-action="toggle-public-menu"]')?.focus());
+    requestAnimationFrame(() => document.querySelector('[data-action="open-language"]')?.focus());
     return;
   }
   if (event.key !== "Tab" || !state.modal) return;
@@ -823,12 +894,10 @@ app.addEventListener("submit", async (event) => {
         body: JSON.stringify(values),
       });
       state.user = data.user;
-      const continueToRequest = state.pendingIntent === "request";
       state.pendingIntent = null;
-      state.modal = continueToRequest ? "request" : null;
-      state.view = "map";
-      await loadMap();
-      render();
+      state.pendingRoute = null;
+      state.modal = null;
+      await navigateToView("map", { replace: true });
       notify(
         state.authMode === "register"
           ? data.email_delivery_configured

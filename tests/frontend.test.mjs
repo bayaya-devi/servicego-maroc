@@ -78,12 +78,13 @@ test("V2.1 uses one scroll-driven viewport with a real marketing map", async () 
   assert.doesNotMatch(source, />Découvrir <span/);
 });
 
-test("V2.1 public nucleus expands horizontally and exposes icon actions", async () => {
+test("V2.2 public nucleus keeps one visual language and exposes the required actions", async () => {
   const [source, styles] = await Promise.all([read("public/app.js"), read("public/styles.css")]);
   assert.match(source, /class="nucleus-secondary"/);
-  assert.match(source, /data-action="cycle-locale"/);
-  assert.match(source, /data-action="open-contact"/);
-  assert.match(source, /state\.publicMenuOpen \? "−" : "\+"/);
+  assert.match(source, /data-action="open-language"/);
+  assert.match(source, /data-action="open-faq"/);
+  assert.match(source, /data-action="open-legal"/);
+  assert.match(source, /icon\(state\.publicMenuOpen \? "minus" : "plus"\)/);
   assert.doesNotMatch(source, /class="nucleus-more"/);
   assert.match(styles, /\.is-expanded \.nucleus-secondary\s*\{[^}]*width:/s);
 });
@@ -100,7 +101,7 @@ test("V2.1 signup, recovery and public information are complete", async () => {
   assert.match(worker, /\/api\/public-context/);
 });
 
-test("the immediate-help CTA preserves request intent through authentication", async () => {
+test("the immediate-help CTA opens signup first and sends authenticated users to request creation", async () => {
   const [source, styles, i18n] = await Promise.all([read("public/app.js"), read("public/styles.css"), read("public/i18n.js")]);
   assert.match(source, /data-action="urgent-request"/);
   assert.match(source, /J'ai besoin d'aide maintenant/);
@@ -108,7 +109,8 @@ test("the immediate-help CTA preserves request intent through authentication", a
   assert.match(i18n, /أحتاج إلى المساعدة الآن/);
   assert.match(source, /state\.pendingIntent = "request"/);
   assert.match(source, /state\.authMode = "register"/);
-  assert.match(source, /continueToRequest \? "request" : null/);
+  assert.match(source, /state\.modal = "request"/);
+  assert.match(source, /navigateToView\("map", \{ replace: true \}\)/);
   assert.match(styles, /\.urgent-help-cta\s*\{[^}]*backdrop-filter:[^}]*animation:urgent-help-pulse/s);
   assert.match(styles, /\.discover-arrow,\.urgent-help-cta\s*\{\s*animation:none/);
 });

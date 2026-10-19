@@ -41,6 +41,15 @@
   --sg-content: 1180px;
   --sg-font: "Manrope", ui-sans-serif, system-ui, sans-serif;
   --sg-font-ar: "Noto Sans Arabic", "Manrope", sans-serif;
+  --sg-text-display: clamp(46px, 5.5vw, 82px);
+  --sg-text-page: clamp(30px, 4vw, 46px);
+  --sg-text-section: clamp(21px, 2.4vw, 28px);
+  --sg-text-body: 16px;
+  --sg-text-label: 13px;
+  --sg-text-micro: 12px;
+  --sg-line-body: 1.58;
+  --sg-glass-member: rgba(247, 252, 253, 0.72);
+  --sg-member-canvas: #e9f2f4;
 }
 
 @media (prefers-color-scheme: dark) {
@@ -59,6 +68,8 @@
     --sg-glass-public: rgba(15, 32, 46, 0.56);
     --sg-glass-public-strong: rgba(15, 32, 46, 0.76);
     --sg-glass-border: rgba(210, 236, 244, 0.22);
+    --sg-glass-member: rgba(18, 36, 52, 0.76);
+    --sg-member-canvas: #0b1823;
   }
 }
 
