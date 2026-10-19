@@ -1,12 +1,13 @@
 # ServiceGO V2.1 - Rapport de livraison
 
 Date de verification : 19 octobre 2026  
-Branche : `master`  
-Reference auditee : `b339c4b`  
+Branche : `servicego-v2.1-preview`  
+Reference auditee : `4a40e32`  
 Previsualisation : https://servicego-v21-preview.aetbconseil.workers.dev  
-Version Cloudflare : `789c526c-8e20-4caf-934a-70185a27a079`  
+Version Cloudflare : `6838868a-ab65-4243-9b75-d2519985aaf8`  
 Commit d'implementation : `ede9547` (`feat: preparer ServiceGO V2.1 immersive`)  
 Correctif aide immediate : `23d4624` (`feat: ajouter le parcours d'aide immediate`)  
+Correctif linguistique : `4a40e32` (`fix: corriger les textes et traductions`)  
 Production actuelle non remplacee : https://servicego-maroc.aetbconseil.workers.dev
 
 ## Perimetre livre
@@ -19,6 +20,7 @@ Production actuelle non remplacee : https://servicego-maroc.aetbconseil.workers.
 - FR, EN et AR avec RTL complet sur les interfaces publiques.
 - Catalogue photo local, optimise, documente et extensible par pays.
 - Bouton d'aide immediate en verre depoli avec intention conservee jusqu'a la creation d'une demande apres inscription ou connexion.
+- Correction linguistique complete des textes systeme FR, EN et AR, y compris les formulaires, notifications, erreurs API, profils et vues d'administration.
 
 Les cartes membres, tableaux de bord, profils, annonces et administration n'ont pas ete refondus.
 
@@ -34,6 +36,7 @@ Les cartes membres, tableaux de bord, profils, annonces et administration n'ont 
 
 Crees :
 
+- `public/i18n.js`
 - `public/photo-catalog.js`
 - `public/assets/servicego-characters.png`
 - Six variantes WebP locales dans `public/assets/scenes/`
@@ -52,6 +55,8 @@ Modifies :
 ## Localisation et photos
 
 Ordre applique : choix de langue enregistre, preferences du navigateur, repli francais. La langue n'est jamais remplacee par le pays Cloudflare.
+
+Le catalogue `public/i18n.js` centralise les textes d'interface et les messages du serveur. Les anciens libelles techniques ou deja stockes en base sont convertis par des alias d'affichage, sans modifier les contenus rediges par les utilisateurs. Les fichiers texte sont controles par decodage UTF-8 strict, normalisation Unicode NFC et recherche du caractere de remplacement.
 
 Pour les photos, le Worker fournit d'abord le pays Cloudflare. En son absence, seule une region explicite de locale navigateur, par exemple `fr-FR`, peut servir de repli. Une langue seule ne produit pas de pays. Le catalogue selectionne deux photos du pays lorsqu'elles existent, sinon un ensemble international. Le melange a lieu une seule fois au chargement complet, reste stable pendant la visite et les deux images suivantes sont prechargees.
 
@@ -92,12 +97,15 @@ Google Maps n'a pas ete utilise car aucune cle ni integration officielle n'est c
 
 ## Tests et captures
 
-- `npm test` : 12 tests passes.
+- `npm test` : 15 tests passes.
 - `npm run check` : generation des types Wrangler reussie.
-- `node --check public/app.js` : reussi.
+- `node --check` sur les modules JavaScript modifies : reussi.
 - Tests visuels automatises : 23 captures.
 - Matrice responsive validee : 320, 375, 390, 768, 1024 et 1440 px.
 - Langues verifiees : FR, EN et AR/RTL.
+- Vues membres verifiees dans les trois langues sur desktop et mobile : carte, formulaires, messages, profil et administration.
+- Catalogue controle automatiquement : aucune traduction manquante, aucune cle dupliquee et presence de caracteres arabes dans chaque traduction AR.
+- Encodage controle automatiquement : UTF-8 strict, Unicode NFC et absence de caractere de remplacement.
 - Themes verifies : clair et sombre.
 - Aucun debordement horizontal ni erreur JavaScript detecte dans la matrice.
 - Parcours d'aide immediate valides sur le serveur local puis sur la previsualisation Cloudflare : inscription, connexion et session deja ouverte.
