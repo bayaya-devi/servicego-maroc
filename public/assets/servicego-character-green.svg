@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 420" role="img" aria-labelledby="title">
+  <title id="title">Personnage vert ServiceGO</title>
+  <defs>
+    <linearGradient id="green" x1="42" y1="30" x2="276" y2="330" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#18c465"/>
+      <stop offset="1" stop-color="#08aa50"/>
+    </linearGradient>
+  </defs>
+  <path fill="url(#green)" d="M90 16C37 16 6 47 6 101v159c0 50 21 86 61 94l13 2 27 49c6 11 21 11 27 0l26-48 25-4c72-10 119-54 119-121v-72c0-88-57-144-143-144H90Z"/>
+  <circle cx="165" cy="128" r="50" fill="#fff"/>
+  <path fill="url(#green)" d="M108 99c-9-1-15-9-13-17 1-7 8-12 16-11l110 14c9 1 14 9 13 17-1 8-8 13-17 12L108 99Z"/>
+  <path fill="#fff" d="M110 190c27-19 73-15 94 5 19 14 27 32 27 54v40c0 19-7 28-26 32-23 5-63 7-92 3-21-3-28-10-28-30v-36c0-31 7-54 25-68Z"/>
+  <path fill="url(#green)" fill-rule="evenodd" d="m116 259 29 29 59-66a14 14 0 0 1 21 19l-69 77a15 15 0 0 1-21 1l-40-40a14 14 0 1 1 21-20Z"/>
+</svg>

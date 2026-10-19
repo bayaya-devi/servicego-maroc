@@ -162,7 +162,7 @@ function homeView() {
   const second = photos[1] || photos[0];
   const alt = (photo) => escape(photo.alt[state.locale] || photo.alt.fr);
   const credit = [...new Set(photos.map((photo) => photo.credit))].join(" · ");
-  const characters = `<div class="character-stage" aria-label="Les deux personnages ServiceGO se rencontrent"><span class="character blue-character" aria-hidden="true"></span><span class="meeting-light" aria-hidden="true"></span><span class="character green-character" aria-hidden="true"></span></div>`;
+  const characters = `<div class="character-stage" aria-label="Les deux personnages ServiceGO se rencontrent"><img class="character blue-character" src="/assets/servicego-character-blue.svg" alt=""><span class="meeting-light" aria-hidden="true"></span><img class="character green-character" src="/assets/servicego-character-green.svg" alt=""></div>`;
   return `<main id="main-content" class="story-v21" tabindex="-1" style="--photo-one:url('${first.resolutions.large}');--photo-two:url('${second.resolutions.large}')"><div class="story-scroll" aria-hidden="true"><span id="moment-one"></span><span id="possibilities"></span><span id="moment-three"></span></div><div class="story-viewport"><div class="story-photo photo-one" role="img" aria-label="${alt(first)}"></div><div class="story-photo photo-two" role="img" aria-label="${alt(second)}"></div><div class="story-light" aria-hidden="true"></div><section class="narrative moment-one" aria-labelledby="story-title"><div class="discovery-copy"><h1 id="story-title"><span>Un besoin.</span><span>Une personne.</span><span>Une solution.</span></h1><button class="urgent-help-cta" data-action="urgent-request" aria-label="J'ai besoin d'aide maintenant"><span class="urgent-help-icon" aria-hidden="true">⚡</span><span>J'ai besoin d'aide maintenant</span></button></div><div class="device-perspective"><div class="smartphone" aria-label="Aperçu fictif de ServiceGO"><div class="phone-frame"><div class="phone-speaker" aria-hidden="true"></div><div class="phone-screen"><div class="phone-status" aria-hidden="true"><span>9:41</span><span>● ● ▰</span></div><div id="marketing-map" class="marketing-map" aria-label="Carte géographique fictive"><div class="marketing-pins">${staticBubble("need", "Fuite", "left:38%;top:42%", true)}${staticBubble("help", "Peinture", "left:62%;top:28%")}${staticBubble("need", "Livraison", "left:58%;top:62%")}${staticBubble("help", "Ménage", "left:34%;top:73%")}</div></div></div><span class="phone-reflection" aria-hidden="true"></span></div></div></div><button class="discover-arrow" data-action="discover" aria-label="Découvrir"><span aria-hidden="true">↓</span></button></section><section class="narrative moment-two" aria-labelledby="possibility-title"><div class="story-content"><h2 id="possibility-title">Deux possibilités. Un seul compte.</h2>${characters}<div class="possibility-actions"><button class="possibility need" data-action="open-auth" data-intent="request"><span>Je demande</span></button><button class="possibility offer" data-action="open-auth" data-intent="offer"><span>Je propose</span></button></div></div></section><section class="narrative moment-three" aria-labelledby="conclusion-title"><div class="story-content">${characters}<h2 id="conclusion-title">L'entraide commence ici.</h2><button class="button large join" data-action="open-auth">Rejoindre ServiceGO</button><p class="photo-credit">${translate(state.locale, "Photos :")} ${escape(credit)} · Unsplash</p></div></section></div></main><button class="back-to-top" data-action="back-top" aria-label="Retour en haut">↑</button>`;
 }
 function mapBubbles() {
@@ -452,7 +452,17 @@ function updateStoryProgress() {
   const story = document.querySelector(".story-v21");
   if (!story) return;
   const progress = Math.min(1, Math.max(0, (window.scrollY - story.offsetTop) / Math.max(1, story.scrollHeight - innerHeight)));
-  const meeting = Math.min(1, Math.max(0, (progress - 0.26) / 0.28));
+  const clamp = (value) => Math.min(1, Math.max(0, value));
+  const smooth = (value) => {
+    const clamped = clamp(value);
+    return clamped * clamped * (3 - 2 * clamped);
+  };
+  const characterProgress = clamp((progress - 0.17) / 0.58);
+  const emergence = smooth(characterProgress / 0.16);
+  const separation = smooth((characterProgress - 0.1) / 0.22);
+  const approach = smooth((characterProgress - 0.38) / 0.25);
+  const returnHome = smooth((characterProgress - 0.7) / 0.2);
+  const meeting = smooth((characterProgress - 0.38) / 0.25);
   const conclusion = Math.min(1, Math.max(0, (progress - 0.68) / 0.2));
   const momentOne = 1 - Math.min(1, Math.max(0, (progress - 0.12) / 0.16));
   const momentTwoIn = Math.min(1, Math.max(0, (progress - 0.18) / 0.14));
@@ -461,8 +471,12 @@ function updateStoryProgress() {
   const phoneOpacity = 1 - Math.min(1, Math.max(0, (progress - 0.38) / 0.13));
   const titleOpacity = Math.min(1, Math.max(0, (meeting - 0.16) / 0.4));
   const actionOpacity = Math.min(1, Math.max(0, (meeting - 0.7) / 0.3));
-  const characterOffset = (1 - meeting) * Math.min(165, innerWidth * 0.26);
-  const saluteAngle = meeting > 0.84 ? Math.sin(((meeting - 0.84) / 0.16) * Math.PI) * 5 : 0;
+  const characterWidth = innerWidth <= 390 ? 105 : innerWidth <= 760 ? 124 : 170;
+  const stageWidth = Math.min(640, innerWidth * 0.9);
+  const maxGap = Math.min(190, Math.max(24, stageWidth - characterWidth * 2 - 12));
+  const restingGap = Math.min(112, maxGap * 0.64);
+  const characterGap = 8 + separation * maxGap - approach * maxGap + returnHome * restingGap;
+  const meetingGlow = Math.sin(clamp((characterProgress - 0.5) / 0.36) * Math.PI);
   document.documentElement.style.setProperty("--story-progress", progress.toFixed(4));
   document.documentElement.style.setProperty("--meeting-progress", meeting.toFixed(4));
   document.documentElement.style.setProperty("--conclusion-progress", conclusion.toFixed(4));
@@ -472,8 +486,11 @@ function updateStoryProgress() {
   document.documentElement.style.setProperty("--title-opacity", titleOpacity.toFixed(4));
   document.documentElement.style.setProperty("--action-opacity", actionOpacity.toFixed(4));
   document.documentElement.style.setProperty("--action-shift", `${((1 - actionOpacity) * 16).toFixed(2)}px`);
-  document.documentElement.style.setProperty("--character-offset", `${characterOffset.toFixed(2)}px`);
-  document.documentElement.style.setProperty("--salute-angle", `${saluteAngle.toFixed(2)}deg`);
+  document.documentElement.style.setProperty("--character-gap", `${characterGap.toFixed(2)}px`);
+  document.documentElement.style.setProperty("--character-half-gap", `${(characterGap / 2).toFixed(2)}px`);
+  document.documentElement.style.setProperty("--character-scale", (0.42 + emergence * 0.58).toFixed(4));
+  document.documentElement.style.setProperty("--character-opacity", emergence.toFixed(4));
+  document.documentElement.style.setProperty("--meeting-glow", meetingGlow.toFixed(4));
   document.documentElement.style.setProperty("--phone-shift", `${(-progress * 36).toFixed(2)}px`);
   document.documentElement.style.setProperty("--photo-scale", (1.06 - progress * 0.035).toFixed(4));
   document.documentElement.style.setProperty("--moment-two-shift", `${((1 - momentTwo) * 20).toFixed(2)}px`);

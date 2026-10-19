@@ -37,7 +37,9 @@ test("the V2 public story uses the official characters and exact narrative", asy
   assert.match(source, /L'entraide commence ici\./);
   assert.match(source, /class="character blue-character"/);
   assert.match(source, /class="character green-character"/);
-  assert.match(styles, /servicego-symbol\.png/);
+  assert.match(source, /servicego-character-blue\.svg/);
+  assert.match(source, /servicego-character-green\.svg/);
+  assert.doesNotMatch(source + styles, /servicego-characters\.png/);
   assert.match(styles, /prefers-reduced-motion:reduce/);
 });
 

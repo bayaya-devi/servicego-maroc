@@ -158,7 +158,7 @@ textarea { min-height:100px;resize:vertical }
 .story .preview-phone { width:min(100%,405px);height:600px;transform:rotate(var(--phone-rotate,-3deg));transition:transform .16s linear;border-color:rgba(255,255,255,.7);box-shadow:0 35px 110px rgba(3,14,29,.46) }
 .story-content { width:min(1120px,calc(100% - 40px));margin:auto;text-align:center }.story-content h2 { margin:0;color:var(--sg-ink);font-size:52px;line-height:1.08 }.conclusion .story-content h2 { color:#fff }
 .character-stage { position:relative;width:min(640px,90vw);height:300px;margin:42px auto 24px;display:flex;align-items:center;justify-content:center;gap:180px }
-.character { position:relative;width:170px;height:235px;display:block;background-image:url('/assets/servicego-symbol.png');background-repeat:no-repeat;background-size:410px 410px;mix-blend-mode:multiply;filter:drop-shadow(0 18px 22px rgba(20,34,56,.18));transition:transform 1.15s cubic-bezier(.2,.78,.2,1) }
+.character { position:relative;width:170px;height:235px;display:block;filter:drop-shadow(0 18px 22px rgba(20,34,56,.18));transition:transform 1.15s cubic-bezier(.2,.78,.2,1) }
 .blue-character { background-position:-34px -75px;transform:translateX(-90px) rotate(-4deg) }.green-character { background-position:-211px -75px;transform:translateX(90px) rotate(4deg) }
 .meeting-light { position:absolute;width:150px;height:150px;border-radius:50%;background:radial-gradient(circle,var(--sg-light-mint),transparent 70%);opacity:0;transform:scale(.6);transition:opacity .8s .55s ease,transform .8s .55s ease }
 .is-visible .blue-character { transform:translateX(28px) rotate(0) }.is-visible .green-character { transform:translateX(-28px) rotate(0) }.is-visible .meeting-light { opacity:1;transform:scale(1.3) }
@@ -236,25 +236,22 @@ body.modal-open { overflow:hidden }
 @keyframes arrow-pulse { 0%,100% { translate:0 0;box-shadow:0 0 0 0 rgba(255,255,255,.12) } 50% { translate:0 5px;box-shadow:0 0 0 9px rgba(255,255,255,0) } }
 .moment-two { opacity:var(--moment-two-opacity,0);transform:translateY(var(--moment-two-shift,20px)) }
 .moment-two .character,.moment-two .meeting-light,.moment-two h2,.moment-two .possibility-actions { transition:none }
-.moment-two .character,.moment-three .character { background-image:url('/assets/servicego-characters.png');background-size:364px 364px;mix-blend-mode:normal }
-.moment-two .blue-character,.moment-three .blue-character { background-position:-14px -70px }
-.moment-two .green-character,.moment-three .green-character { background-position:-183px -70px }
+.moment-two .character,.moment-three .character { position:absolute;top:50%;left:50%;width:170px;height:224px;object-fit:contain;background:none;mix-blend-mode:normal;opacity:var(--character-opacity,0);transform-origin:center bottom;will-change:transform,opacity }
 .moment-two .story-content,.moment-three .story-content { pointer-events:none }
 .moment-two.is-interactive .story-content,.moment-three.is-interactive .story-content { pointer-events:auto }
 .moment-two h2 { opacity:var(--title-opacity,0) }
 .moment-two .character-stage { gap:0;margin:34px auto 20px }
-.moment-two .blue-character { transform:translateX(calc(0px - var(--character-offset,165px))) rotate(calc(0deg - var(--salute-angle,0deg))) }
-.moment-two .green-character { transform:translateX(var(--character-offset,165px)) rotate(var(--salute-angle,0deg)) }
-.moment-two .meeting-light { opacity:var(--action-opacity,0);transform:scale(1.15) }
-.moment-two .meeting-light,.moment-three .meeting-light { z-index:3 }
-.moment-two .meeting-light::before,.moment-three .meeting-light::before { content:"";position:absolute;left:50%;top:50%;width:66px;height:66px;border-radius:50%;background:rgba(67,198,165,.94);box-shadow:0 0 38px rgba(67,198,165,.72);transform:translate(-50%,-50%) }
-.moment-two .meeting-light::after,.moment-three .meeting-light::after { content:"";position:absolute;left:50%;top:50%;width:30px;height:30px;border:4px solid rgba(255,255,255,.92);border-radius:50%;background:var(--sg-orange);box-shadow:0 0 28px rgba(67,198,165,.72);transform:translate(-50%,-50%) }
+.moment-two .blue-character,.moment-three .blue-character { transform:translate(calc(-100% - var(--character-half-gap,4px)),-50%) scale(var(--character-scale,0.42)) }
+.moment-two .green-character,.moment-three .green-character { transform:translate(var(--character-half-gap,4px),-50%) scale(var(--character-scale,0.42)) }
+.moment-two .meeting-light { opacity:var(--meeting-glow,0);transform:scale(calc(.72 + var(--meeting-glow,0)*.48)) }
+.moment-two .meeting-light,.moment-three .meeting-light { z-index:0;width:130px;height:130px;background:radial-gradient(circle,rgba(116,225,196,.72),rgba(116,225,196,.2) 42%,transparent 72%);filter:blur(2px) }
+.moment-two .meeting-light::before,.moment-two .meeting-light::after,.moment-three .meeting-light::before,.moment-three .meeting-light::after { content:none }
 .moment-two h2 { color:#fff;text-shadow:0 3px 30px rgba(8,27,38,.55) }
 .moment-two .possibility-actions { opacity:var(--action-opacity,0);transform:translateY(var(--action-shift,16px)) }
 .possibility-actions { gap:12px;width:min(480px,100%) }.possibility { min-height:54px;display:block;padding:10px 20px;border-radius:999px;background:var(--sg-glass-public-strong)!important;box-shadow:var(--sg-depth-1);color:var(--sg-ink)!important }.possibility.need { border-color:rgba(37,133,230,.58) }.possibility.offer { border-color:rgba(255,145,56,.72) }
 .moment-three { opacity:var(--conclusion-progress,0);transform:translateY(var(--conclusion-shift,26px)) }
 .moment-three .story-content { display:grid;justify-items:center }
-.moment-three .character-stage { height:230px;margin:0 auto 8px;gap:4px }.moment-three .character { width:142px;height:205px;background-size:300px 300px;animation:character-greeting 3.6s ease-in-out infinite }.moment-three .blue-character { background-position:-12px -58px;transform:translateX(14px) }.moment-three .green-character { background-position:-151px -58px;transform:translateX(-14px);animation-delay:.35s }.moment-three .meeting-light { opacity:1;transform:scale(1.05) }
+.moment-three .character-stage { height:230px;margin:0 auto 8px;gap:0 }.moment-three .character { width:142px;height:196px;opacity:1;animation:character-greeting 3.8s ease-in-out infinite }.moment-three .blue-character { transform:translate(calc(-100% - 42px),-50%) scale(1) }.moment-three .green-character { transform:translate(42px,-50%) scale(1);animation-delay:.3s }.moment-three .meeting-light { opacity:.38;transform:scale(.9) }
 .moment-three h2 { color:#fff!important;font-size:clamp(38px,5vw,66px);text-shadow:0 3px 30px rgba(8,27,38,.46) }.moment-three .join { margin-top:24px;color:#102f2a;background:rgba(116,225,196,.92);box-shadow:0 14px 42px rgba(23,102,82,.28) }
 .moment-three .photo-credit { right:84px }
 
@@ -276,11 +273,11 @@ body.modal-open { overflow:hidden }
   .public-nucleus { left:50%;right:auto }.is-expanded .nucleus-secondary { width:min(192px,calc(100vw - 164px)) }.public-nucleus nav { max-width:calc(100vw - 16px) }.nucleus-icon { flex-basis:44px;width:44px;height:44px }
   .story-v21 { height:410svh }.narrative { padding:40px 18px 88px }.moment-one { grid-template-columns:1fr;grid-template-rows:auto 1fr;gap:8px }.moment-one .discovery-copy { align-self:end;justify-self:center;text-align:center }.moment-one h1 { font-size:clamp(38px,11vw,54px) }.urgent-help-cta { min-height:48px;margin-top:18px;padding:10px 14px;font-size:14px }.device-perspective { min-width:0;width:min(64vw,270px);align-self:start }.phone-frame { border-radius:38px }.phone-screen,.phone-reflection { border-radius:30px }
   .discover-arrow { bottom:80px }.moment-two .story-content,.moment-three .story-content { width:100% }.moment-two .character-stage { height:210px;gap:0 }.moment-two h2 { font-size:34px }.possibility-actions { grid-template-columns:1fr 1fr;width:min(360px,100%) }.possibility { min-height:50px;padding:8px 10px }.possibility span { font-size:16px }
-  .moment-two .character { background-size:270px 270px }.moment-two .blue-character { background-position:-10px -52px }.moment-two .green-character { background-position:-136px -52px }.moment-three .character-stage { height:190px }.moment-three .character { width:112px;height:166px;background-size:240px 240px }.moment-three .blue-character { background-position:-9px -46px }.moment-three .green-character { background-position:-121px -46px }.moment-three h2 { font-size:40px }.photo-credit { right:12px;bottom:72px;left:12px;text-align:center }
+  .moment-two .character { width:124px;height:174px }.moment-three .character-stage { height:190px }.moment-three .character { width:112px;height:158px }.moment-three .blue-character { transform:translate(calc(-100% - 28px),-50%) }.moment-three .green-character { transform:translate(28px,-50%) }.moment-three h2 { font-size:40px }.photo-credit { right:12px;bottom:72px;left:12px;text-align:center }
   .public-modal { padding:26px 18px }.public-modal h2 { font-size:26px }.phone-field { grid-template-columns:112px 1fr }.legal-nav { margin-inline:-4px }.legal-content { padding:17px }.form-grid { grid-template-columns:1fr }.field.full,.submit,.forgot-link { grid-column:auto }
 }
 @media (max-width:390px) {
-  .is-expanded .nucleus-secondary { gap:0;width:176px }.is-expanded .nucleus-icon { flex-basis:40px;width:40px }.moment-one h1 { font-size:38px }.device-perspective { width:58vw }.moment-two h2 { font-size:30px }.possibility-actions { gap:7px }.phone-field { grid-template-columns:105px 1fr }
+  .is-expanded .nucleus-secondary { gap:0;width:176px }.is-expanded .nucleus-icon { flex-basis:40px;width:40px }.moment-one h1 { font-size:38px }.device-perspective { width:58vw }.moment-two h2 { font-size:30px }.moment-two .character { width:105px;height:155px }.possibility-actions { gap:7px }.phone-field { grid-template-columns:105px 1fr }
 }
 @media (prefers-reduced-motion:reduce) {
   .story-v21 { height:auto;min-height:300svh }.story-viewport { position:relative;height:auto;min-height:300svh;display:grid }.narrative { position:relative;min-height:100svh;opacity:1!important;transform:none!important }.story-photo { position:fixed;transform:none }.moment-two .character,.moment-three .character { transform:none!important;animation:none }.moment-two h2,.moment-two .possibility-actions,.moment-two .meeting-light { opacity:1!important;transform:none }.moment-two .story-content,.moment-three .story-content { pointer-events:auto }.device-perspective { opacity:1;transform:none }.smartphone { transform:none }.discover-arrow,.urgent-help-cta { animation:none }

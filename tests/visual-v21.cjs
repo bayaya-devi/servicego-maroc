@@ -24,36 +24,82 @@ async function captureSuite(browser, prefix, viewport) {
   const page = await browser.newPage({ viewport, reducedMotion: "no-preference" });
   await page.goto(baseUrl, { waitUntil: "networkidle" });
   await capture(page, prefix, "01-first-moment");
-  await capture(page, prefix, "05-nucleus-closed");
+  await capture(page, prefix, "08-nucleus-closed");
 
-  await scrollToProgress(page, 0.34);
-  await capture(page, prefix, "02-second-moment");
+  await scrollToProgress(page, 0.22);
+  await capture(page, prefix, "02-characters-emerge");
+  await scrollToProgress(page, 0.36);
+  await capture(page, prefix, "03-characters-separated");
+  await scrollToProgress(page, 0.47);
+  await capture(page, prefix, "04-characters-approach");
   await scrollToProgress(page, 0.55);
-  await capture(page, prefix, "03-character-meeting");
+  await capture(page, prefix, "05-characters-meet");
+  await scrollToProgress(page, 0.64);
+  await capture(page, prefix, "06-characters-return");
   await scrollToProgress(page, 0.91);
-  await capture(page, prefix, "04-third-moment");
+  await capture(page, prefix, "07-characters-alive");
 
   await page.goto(baseUrl, { waitUntil: "networkidle" });
   await page.getByRole("button", { name: "Plus", exact: true }).click();
-  await capture(page, prefix, "06-nucleus-open");
+  await capture(page, prefix, "09-nucleus-open");
   await page.getByRole("button", { name: "Connexion", exact: true }).click();
-  await capture(page, prefix, "07-login");
+  await capture(page, prefix, "10-login");
   await page.getByRole("button", { name: "Créer un compte", exact: true }).click();
-  await capture(page, prefix, "08-register");
+  await capture(page, prefix, "11-register");
   await page.getByRole("button", { name: "Fermer", exact: true }).click();
 
   await page.getByRole("button", { name: "Plus", exact: true }).click();
   await page.getByRole("button", { name: "Questions fréquentes", exact: true }).click();
-  await capture(page, prefix, "09-faq");
+  await capture(page, prefix, "12-faq");
   await page.getByRole("button", { name: "Fermer", exact: true }).click();
   await page.getByRole("button", { name: "Plus", exact: true }).click();
   await page.getByRole("button", { name: "Informations légales", exact: true }).click();
-  await capture(page, prefix, "10-legal");
+  await capture(page, prefix, "13-legal");
   await page.getByRole("button", { name: "Fermer", exact: true }).click();
   await page.getByRole("button", { name: "Plus", exact: true }).click();
   await page.getByRole("button", { name: "Contact", exact: true }).click();
-  await capture(page, prefix, "11-contact");
+  await capture(page, prefix, "14-contact");
   await page.close();
+}
+
+async function validateCharacterSequence(browser) {
+  for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 }]) {
+    const page = await browser.newPage({ viewport, reducedMotion: "no-preference" });
+    const errors = [];
+    page.on("pageerror", (error) => errors.push(error.message));
+    await page.goto(baseUrl, { waitUntil: "networkidle" });
+    for (const progress of [0.22, 0.36, 0.47, 0.55, 0.64, 0.91]) {
+      await scrollToProgress(page, progress);
+      await page.waitForTimeout(100);
+      const state = await page.evaluate(() => {
+        const stage = document.querySelector(".moment-two .character-stage");
+        const blue = document.querySelector(".moment-two .blue-character");
+        const green = document.querySelector(".moment-two .green-character");
+        const blueRect = blue.getBoundingClientRect();
+        const greenRect = green.getBoundingClientRect();
+        const stageRect = stage.getBoundingClientRect();
+        return {
+          blueSrc: blue.getAttribute("src"),
+          greenSrc: green.getAttribute("src"),
+          gap: greenRect.left - blueRect.right,
+          inside: blueRect.left >= stageRect.left - 1 && greenRect.right <= stageRect.right + 1,
+          opacity: Number(getComputedStyle(blue).opacity),
+          overflow: document.documentElement.scrollWidth - innerWidth,
+        };
+      });
+      assert.equal(state.blueSrc, "/assets/servicego-character-blue.svg");
+      assert.equal(state.greenSrc, "/assets/servicego-character-green.svg");
+      assert.ok(state.gap >= -1, `${viewport.width}px at ${progress}: characters overlap by ${-state.gap}px`);
+      assert.ok(state.inside, `${viewport.width}px at ${progress}: characters leave their stage`);
+      assert.ok(state.opacity > 0, `${viewport.width}px at ${progress}: characters are invisible`);
+      assert.ok(state.overflow <= 1, `${viewport.width}px at ${progress}: horizontal overflow`);
+    }
+    await scrollToProgress(page, 0.91);
+    const finalAnimation = await page.locator(".moment-three .blue-character").evaluate((element) => getComputedStyle(element).animationName);
+    assert.equal(finalAnimation, "character-greeting", `${viewport.width}px: final bounce is missing`);
+    assert.deepEqual(errors, [], `${viewport.width}px: character sequence browser errors`);
+    await page.close();
+  }
 }
 
 async function validateResponsive(browser) {
@@ -219,6 +265,7 @@ async function validateUrgentIntent(browser) {
     await captureSuite(browser, "desktop-1440x900", { width: 1440, height: 900 });
     await captureSuite(browser, "mobile-390x844", { width: 390, height: 844 });
     await validateResponsive(browser);
+    await validateCharacterSequence(browser);
     await validateUrgentIntent(browser);
   }
   await validateLocalizedMemberViews(browser);
