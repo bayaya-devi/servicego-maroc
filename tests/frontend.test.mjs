@@ -115,6 +115,25 @@ test("the immediate-help CTA opens signup first and sends authenticated users to
   assert.match(styles, /\.discover-arrow,\.urgent-help-cta\s*\{\s*animation:none/);
 });
 
+test("the V2.2 member experience keeps map, messaging and dashboard workflows connected", async () => {
+  const [source, styles] = await Promise.all([read("public/app.js"), read("public/styles.css")]);
+  assert.match(source, /class="map-floating-actions"/);
+  assert.match(source, /data-action="locate-me"/);
+  assert.match(source, /class="premium-map-pin/);
+  assert.match(source, /class="map-cluster/);
+  assert.match(source, /Proposer mon aide/);
+  assert.match(source, /Demander ce service/);
+  assert.match(source, /class="glass-back"/);
+  assert.match(source, /mobileConversationOpen/);
+  for (const label of ["Mon compte", "Mon activité", "Mes échanges", "Mon suivi"]) assert.match(source, new RegExp(label));
+  assert.doesNotMatch(source, /class="panel actions-panel"/);
+  assert.match(styles, /\.premium-map-pin\s*\{[^}]*background:rgba\(37,133,230/s);
+  assert.match(styles, /\.premium-map-pin\.help\s*\{[^}]*background:rgba\(32,164,132/s);
+  assert.match(styles, /\.messages-layout\s*\{[^}]*min-height:610px/s);
+  assert.match(styles, /\.dashboard-section/);
+  assert.match(styles, /@media \(max-width:760px\)[\s\S]*\.messages-layout/);
+});
+
 test("the translation catalog is complete, normalized and valid UTF-8", async () => {
   const { translationEntries, uiTranslations } = await import("../public/i18n.js");
   const files = ["public/index.html", "public/app.js", "public/i18n.js", "public/photo-catalog.js", "public/styles.css", "public/tokens.css", "worker/index.ts"];

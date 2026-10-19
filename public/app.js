@@ -36,8 +36,12 @@ const state = {
   geo: { country: "", region: "", city: "", source: "fallback" },
   publicPhotos: [],
   passwordVisible: false,
+  mobileConversationOpen: false,
+  locating: false,
 };
 let leafletMap = null;
+let mapMarkerLayer = null;
+let userLocationMarker = null;
 let marketingMap = null;
 let modalReturnAction = null;
 const cities = {
@@ -162,8 +166,30 @@ function icon(name) {
     plus: '<path d="M12 5v14M5 12h14"/>',
     minus: '<path d="M5 12h14"/>',
     send: '<path d="m3 11 18-8-8 18-2-8z"/><path d="m11 13 10-10"/>',
+    location: '<circle cx="12" cy="12" r="3"/><circle cx="12" cy="12" r="7"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3"/>',
+    request: '<path d="M12 3a7 7 0 0 0-7 7v8l3-2h4a7 7 0 1 0 0-14Z"/><path d="M12 7v6M9 10h6"/>',
+    offer: '<path d="M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18Z"/><path d="M8 12.5 10.7 15 16 9"/>',
+    arrowLeft: '<path d="m15 18-6-6 6-6"/>',
+    activity: '<path d="M3 12h4l2-6 4 12 2-6h6"/>',
+    clock: '<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>',
   };
   return `<svg class="sg-icon" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">${paths[name] || paths.plus}</svg>`;
+}
+function initials(value) {
+  return String(value || "ServiceGO").trim().split(/\s+/).slice(0, 2).map((part) => part[0] || "").join("").toUpperCase();
+}
+function formatDate(value) {
+  if (!value) return "";
+  const normalized = /Z|[+-]\d\d:?\d\d$/.test(value) ? value : `${String(value).replace(" ", "T")}Z`;
+  const date = new Date(normalized);
+  if (Number.isNaN(date.getTime())) return "";
+  return new Intl.DateTimeFormat(state.locale, { day: "numeric", month: "short", year: date.getFullYear() !== new Date().getFullYear() ? "numeric" : undefined }).format(date);
+}
+function pricePresentation(item, request) {
+  const raw = String(request ? item.budget_hint || "" : item.price_hint || "").trim();
+  if (!raw) return { short: "À convenir", full: request ? "Budget à convenir" : "Prix à convenir" };
+  if (/gratuit|bénévol|free|مجاني/i.test(raw)) return { short: "Gratuit", full: raw };
+  return { short: "Rémunéré", full: raw };
 }
 function languageMenu() {
   if (!state.languageMenuOpen) return "";
@@ -249,25 +275,55 @@ function mountInteractiveMap() {
       kind: "help",
     })),
   ].filter((entry) => (state.mapFilter === "all" || state.mapFilter === entry.type) && (state.mapCategory === "all" || state.mapCategory === entry.item.category_id));
-  for (const entry of entries) {
-    const label = escape(entry.item.title).slice(0, 32);
-    const icon = Leaflet.divIcon({
-      className: "servicego-marker",
-      html: `<span class="map-pin ${entry.kind} ${entry.item.urgency === "urgent" ? "urgent" : ""}">${entry.kind === "need" ? "?" : "v"}<span>${label}</span></span>`,
-      iconSize: [120, 54],
-      iconAnchor: [60, 46],
+  const drawMarkers = () => {
+    mapMarkerLayer?.remove();
+    mapMarkerLayer = Leaflet.layerGroup().addTo(leafletMap);
+    const zoom = leafletMap.getZoom();
+    const cell = zoom <= 6 ? .55 : zoom <= 8 ? .2 : zoom <= 10 ? .07 : 0;
+    const groups = new Map();
+    entries.forEach((entry, index) => {
+      const latitude = Number(entry.item.latitude);
+      const longitude = Number(entry.item.longitude);
+      const key = cell ? `${Math.round(latitude / cell)}:${Math.round(longitude / cell)}` : `item:${index}`;
+      const group = groups.get(key) || [];
+      group.push({ ...entry, latitude, longitude, index });
+      groups.set(key, group);
     });
-    Leaflet.marker(
-      [Number(entry.item.latitude), Number(entry.item.longitude)],
-      { icon },
-    )
-      .addTo(leafletMap)
-      .bindPopup(`${translate(state.locale, entry.kind === "need" ? "Besoin" : "Service")} : ${label}`)
-      .on("click", () => {
-        state.selected = { type: entry.type, item: entry.item };
-        render();
+    for (const group of groups.values()) {
+      if (group.length > 1) {
+        const latitude = group.reduce((sum, entry) => sum + entry.latitude, 0) / group.length;
+        const longitude = group.reduce((sum, entry) => sum + entry.longitude, 0) / group.length;
+        const clusterIcon = Leaflet.divIcon({ className: "servicego-marker", html: `<button class="map-cluster" aria-label="${group.length} annonces">${group.length}<small>${translate(state.locale, "annonces")}</small></button>`, iconSize: [62, 62], iconAnchor: [31, 31] });
+        Leaflet.marker([latitude, longitude], { icon: clusterIcon }).addTo(mapMarkerLayer).on("click", () => leafletMap.setView([latitude, longitude], Math.min(leafletMap.getZoom() + 2, 12)));
+        continue;
+      }
+      const entry = group[0];
+      const request = entry.type === "request";
+      const pricing = pricePresentation(entry.item, request);
+      const label = escape(entry.item.title).slice(0, 24);
+      const category = escape(entry.item.category_icon || String(entry.item.category_name || "S").charAt(0));
+      const markerIcon = Leaflet.divIcon({
+        className: "servicego-marker",
+        html: `<button class="premium-map-pin ${entry.kind} ${entry.item.urgency === "urgent" ? "urgent" : ""} ${zoom >= 8 ? "with-label" : ""}" aria-label="${label}"><span class="pin-category">${category}</span><span class="pin-copy"><b>${label}</b><small>${escape(translate(state.locale, pricing.short))}</small></span></button>`,
+        iconSize: zoom >= 8 ? [156, 58] : [48, 48],
+        iconAnchor: zoom >= 8 ? [28, 48] : [24, 42],
       });
-  }
+      const offset = zoom >= 11 ? ((entry.index % 7) - 3) * .0018 : 0;
+      Leaflet.marker([entry.latitude + offset, entry.longitude - offset], { icon: markerIcon })
+        .addTo(mapMarkerLayer)
+        .on("click", () => {
+          state.selected = { type: entry.type, item: entry.item };
+          const selection = document.querySelector(".selection");
+          if (selection) {
+            selection.innerHTML = `${selectedItem()}<details class="accessible-list"><summary>${translate(state.locale, "Liste accessible")}</summary>${accessibleMapList()}</details>`;
+            selection.classList.add("has-selection");
+            localizeDom();
+          }
+        });
+    }
+  };
+  drawMarkers();
+  leafletMap.on("zoomend", drawMarkers);
   if (!entries.length) {
     Leaflet.popup({ closeButton: false, autoClose: false, closeOnClick: false })
       .setLatLng([31.75, -7.1])
@@ -277,14 +333,42 @@ function mountInteractiveMap() {
       .openOn(leafletMap);
   }
 }
+function locateUser() {
+  if (!navigator.geolocation || !leafletMap) {
+    notify("La localisation n'est pas disponible sur cet appareil.", true);
+    return;
+  }
+  state.locating = true;
+  document.querySelector('[data-action="locate-me"]')?.classList.add("is-locating");
+  navigator.geolocation.getCurrentPosition(
+    ({ coords }) => {
+      state.locating = false;
+      userLocationMarker?.remove();
+      userLocationMarker = Leaflet.circleMarker([coords.latitude, coords.longitude], { radius: 8, color: "#fff", weight: 3, fillColor: "#2585e6", fillOpacity: 1 })
+        .addTo(leafletMap)
+        .bindTooltip(translate(state.locale, "Votre position"));
+      leafletMap.setView([coords.latitude, coords.longitude], Math.max(leafletMap.getZoom(), 13));
+      notify("Carte recentrée sur votre position.");
+      document.querySelector('[data-action="locate-me"]')?.classList.remove("is-locating");
+    },
+    (error) => {
+      state.locating = false;
+      const message = error.code === 1 ? "Localisation refusée. La carte reste disponible." : "Impossible d'obtenir votre position. Réessayez.";
+      notify(message, true);
+      document.querySelector('[data-action="locate-me"]')?.classList.remove("is-locating");
+    },
+    { enableHighAccuracy: false, timeout: 10000, maximumAge: 120000 },
+  );
+}
 function selectedItem() {
   if (!state.selected)
-    return `<p class="eyebrow">Sélection</p><h2>Appuyez sur une bulle</h2><p>Les bulles bleues représentent les besoins. Les vertes indiquent les personnes disponibles.</p><div class="detail-meta">Vous pouvez être les deux avec le même compte.</div>`;
+    return `<div class="selection-empty">${icon("location")}<p class="eyebrow">Sélection</p><h2>Choisissez une annonce</h2><p>Bleu pour les demandes, vert menthe pour les services proposés.</p></div>`;
   const item = state.selected.item;
   const own =
     item.requester_id === state.user?.id || item.user_id === state.user?.id;
   const request = state.selected.type === "request";
   const identity = request ? item.requester_name : item.full_name;
+  const pricing = pricePresentation(item, request);
   const photo =
     request && item.photo_key
       ? `<img class="detail-photo" src="/api/files/${escape(item.photo_key)}" alt="Photo de la demande" />`
@@ -294,12 +378,12 @@ function selectedItem() {
       ? `<button class="button secondary" data-action="open-offers" data-id="${item.id}">Voir les réponses</button>`
       : `<button class="button outline" disabled>Votre service</button>`
     : request
-      ? `<button class="button" data-action="open-reply" data-id="${item.id}">Répondre</button>`
+      ? `<button class="button" data-action="open-reply" data-id="${item.id}">Proposer mon aide</button>`
       : `<button class="button green" data-action="open-direct" data-id="${item.id}">Demander ce service</button>`;
-  return `<p class="eyebrow">${translate(state.locale, request ? "Demande" : "Service disponible")}</p><h2>${escape(item.title)}</h2><span class="badge">${escape(translate(state.locale, item.category_name || "Service"))} - ${escape(item.district)}</span>${photo}<div class="detail-meta"><strong>${escape(identity || translate(state.locale, "Utilisateur ServiceGO"))}</strong><br>${escape(item.description)}${item.budget_hint || item.price_hint ? `<br><br>${translate(state.locale, request ? "Budget" : "Prix")} : ${escape(item.budget_hint || item.price_hint)}` : ""}</div><div class="detail-actions">${actions}</div>`;
+  return `<div class="listing-detail"><div class="listing-type ${request ? "need" : "help"}">${icon(request ? "request" : "offer")}<span>${translate(state.locale, request ? "Demande de service" : "Offre de service")}</span></div><h2>${escape(item.title)}</h2>${photo}<dl class="listing-facts"><div><dt>Catégorie</dt><dd>${escape(translate(state.locale, item.category_name || "Service"))}</dd></div><div><dt>${translate(state.locale, request ? "Budget" : "Prix")}</dt><dd>${escape(translate(state.locale, pricing.full))}</dd></div><div><dt>Localisation approximative</dt><dd>${escape(item.district)}</dd></div>${item.created_at ? `<div><dt>Publication</dt><dd>${escape(formatDate(item.created_at))}</dd></div>` : ""}</dl><p class="listing-description">${escape(item.description)}</p><div class="listing-author"><span class="conversation-avatar">${escape(initials(identity))}</span><div><small>Publié par</small><strong>${escape(identity || translate(state.locale, "Utilisateur ServiceGO"))}</strong>${!request && item.rating ? `<span>${Number(item.rating).toFixed(1)} / 5 · ${item.review_count || 0} ${translate(state.locale, "avis")}</span>` : ""}</div></div><div class="detail-actions">${actions}</div></div>`;
 }
 function mapView() {
-  return `<main id="main-content" class="workspace" tabindex="-1"><aside class="panel actions-panel"><div><p class="eyebrow">Connecté</p><h2>Que voulez-vous faire ?</h2></div><div class="action-choices"><button class="choice" data-action="open-request"><span class="choice-icon">?</span><span><strong>Demander</strong><small>Publier un besoin</small></span></button><button class="choice green-choice" data-action="open-service"><span class="choice-icon">+</span><span><strong>Proposer</strong><small>Rendre un service visible</small></span></button></div></aside><section class="map-panel"><div id="liveMap" class="real-map" aria-label="Carte interactive du Maroc"></div></section><aside class="panel selection">${selectedItem()}<details class="accessible-list"><summary>Liste accessible</summary>${accessibleMapList()}</details></aside></main>`;
+  return `<main id="main-content" class="workspace premium-map-workspace" tabindex="-1"><section class="map-panel"><div id="liveMap" class="real-map" aria-label="Carte interactive du Maroc"></div><div class="map-floating-actions"><button class="map-fab request-fab" data-action="open-request" aria-label="Demander un service">${icon("request")}<span>Demander</span></button><button class="map-fab offer-fab" data-action="open-service" aria-label="Proposer un service">${icon("offer")}<span>Proposer</span></button></div><button class="map-locate" data-action="locate-me" aria-label="Activer ma localisation">${icon("location")}</button></section><aside class="panel selection">${selectedItem()}<details class="accessible-list"><summary>Liste accessible</summary>${accessibleMapList()}</details></aside></main>`;
 }
 function messagesView() {
   const current = state.conversations.find(
@@ -309,14 +393,14 @@ function messagesView() {
     ? state.conversations
         .map(
           (item) =>
-            `<button class="conversation ${item.id === state.activeConversation ? "active" : ""}" data-action="conversation" data-id="${item.id}"><strong>${escape(item.other_name)}</strong><small>${escape(item.request_title || item.last_message || "Discussion ServiceGO")}</small></button>`,
+            `<button class="conversation ${item.id === state.activeConversation ? "active" : ""}" data-action="conversation" data-id="${item.id}"><span class="conversation-avatar">${escape(initials(item.other_name))}</span><span class="conversation-copy"><span><strong>${escape(item.other_name)}</strong><time>${escape(formatDate(item.updated_at))}</time></span><small>${escape(item.last_message || item.request_title || "Discussion ServiceGO")}</small></span></button>`,
         )
         .join("")
-    : `<div class="loading">Vos discussions apparaîtront ici.</div>`;
+    : `<div class="empty-state">${icon("messages")}<strong>Aucune conversation</strong><p>Vos échanges apparaîtront ici après une mise en relation.</p></div>`;
   const chat = current
-    ? `<section class="chat"><div class="chat-title">${escape(current.other_name)} <small>${escape(current.request_title || "Discussion")}</small></div><div class="message-list">${state.messages.length ? state.messages.map((message) => `<div class="message ${message.sender_id === state.user.id ? "mine" : ""}">${escape(message.body)}<small>${escape(message.sender_name)}</small></div>`).join("") : `<p class="page-lead">Dites bonjour pour commencer.</p>`}</div><form class="message-form" data-form="message"><input name="body" maxlength="2000" placeholder="Écrire un message" required /><button class="button icon" aria-label="Envoyer">${icon("send")}</button></form></section>`
-    : `<section class="chat"><div class="loading">Choisissez une discussion.</div></section>`;
-  return `<main id="main-content" class="view-page member-page messages-page" tabindex="-1"><div class="page-heading"><p class="eyebrow">Messages</p><h1>Vos discussions</h1><p class="page-lead">Après une réponse acceptée ou une demande directe, la discussion s'ouvre ici.</p></div><div class="panel messages-layout"><aside class="conversation-list">${list}</aside>${chat}</div></main>`;
+    ? `<section class="chat ${state.mobileConversationOpen ? "mobile-open" : ""}"><header class="chat-title"><button class="glass-back" data-action="messages-back" aria-label="Retour aux conversations">${icon("arrowLeft")}</button><span class="conversation-avatar">${escape(initials(current.other_name))}</span><div><strong>${escape(current.other_name)}</strong><small>${escape(current.request_title || "Discussion")}</small></div></header><div class="message-list">${state.messages.length ? state.messages.map((message) => `<div class="message ${message.sender_id === state.user.id ? "mine" : ""}"><p>${escape(message.body)}</p><small>${escape(message.sender_name)}${message.created_at ? ` · ${escape(formatDate(message.created_at))}` : ""}</small></div>`).join("") : `<div class="empty-state compact">${icon("messages")}<strong>Dites bonjour pour commencer.</strong></div>`}</div><form class="message-form" data-form="message"><input name="body" maxlength="2000" placeholder="Écrire un message" required /><button class="button icon" aria-label="Envoyer">${icon("send")}</button></form></section>`
+    : `<section class="chat"><div class="empty-state">${icon("messages")}<strong>Choisissez une conversation</strong><p>Sélectionnez un échange dans la liste.</p></div></section>`;
+  return `<main id="main-content" class="view-page member-page messages-page connection-surface" tabindex="-1"><div class="page-heading"><p class="eyebrow">Messages</p><h1>Vos discussions</h1><p class="page-lead">Retrouvez simplement les personnes avec qui vous êtes en contact.</p></div><div class="panel messages-layout ${state.mobileConversationOpen ? "show-conversation" : ""}"><aside class="conversation-list">${list}</aside>${chat}</div></main>`;
 }
 function profileView() {
   const user = state.user;
@@ -339,7 +423,10 @@ function profileView() {
   const admin = user.is_admin
     ? `<section class="panel profile-box"><h3>Administration</h3><p>${state.adminStats ? `${state.adminStats.users} ${translate(state.locale, "comptes")}<br>${state.adminStats.open_requests} ${translate(state.locale, "demandes ouvertes")}<br>${state.adminStats.active_services} ${translate(state.locale, "services visibles")}` : "Chargement des statistiques…"}</p></section>`
     : "";
-  return `<main id="main-content" class="view-page member-page profile-page" tabindex="-1"><div class="page-heading profile-heading"><div><p class="eyebrow">Profil unique</p><h1>Votre compte ServiceGO</h1><p class="page-lead">Ici, vous êtes libre de demander et de proposer.</p></div><button class="nucleus-icon profile-settings" data-action="open-settings" aria-label="Paramètres" data-label="Paramètres">${icon("settings")}</button></div><div class="profile-grid"><section class="panel profile-box profile-main"><div class="avatar">${escape(user.full_name.charAt(0).toUpperCase())}</div><h3>${escape(user.full_name)}</h3><p>${escape(user.email)}<br>${escape(user.district)}</p>${user.email_verified ? `<small>Adresse e-mail confirmée</small>` : `<p><small>Adresse e-mail à confirmer</small><br><button class="text-button" data-action="resend-verification">Renvoyer le lien</button></p>`}<div class="profile-actions"><button class="button secondary" data-action="open-profile">Modifier</button><button class="button outline" data-action="logout">Se déconnecter</button></div></section><section class="panel profile-box"><h3>Mes besoins</h3><ul class="profile-list">${requestItems}</ul></section><section class="panel profile-box"><h3>Mes services</h3><ul class="profile-list">${serviceItems}</ul></section><section class="panel profile-box"><h3>Confiance</h3><p>${Number(user.rating || 5).toFixed(1)} / 5<br>${user.review_count || 0} ${translate(state.locale, "avis")}</p></section>${admin}</div></main>`;
+  const activeRequests = state.mine.requests.filter((item) => item.status === "open" || item.status === "assigned").length;
+  const completedRequests = state.mine.requests.filter((item) => item.status === "completed").length;
+  const visibleServices = state.mine.services.filter((item) => item.available).length;
+  return `<main id="main-content" class="view-page member-page profile-page connection-surface" tabindex="-1"><div class="page-heading profile-heading"><div><p class="eyebrow">Tableau de bord</p><h1>Votre espace ServiceGO</h1><p class="page-lead">Votre compte, vos activités et vos échanges au même endroit.</p></div><button class="nucleus-icon profile-settings" data-action="open-settings" aria-label="Paramètres" data-label="Paramètres">${icon("settings")}</button></div><div class="dashboard-sections"><section class="dashboard-section"><header><span>${icon("user")}</span><div><p class="eyebrow">Mon compte</p><h2>Identité et préférences</h2></div></header><article class="panel account-card"><div class="avatar">${escape(initials(user.full_name))}</div><div class="account-copy"><h3>${escape(user.full_name)}</h3><p>${escape(user.email)} · ${escape(user.district)}</p>${user.email_verified ? `<small>Adresse e-mail confirmée</small>` : `<small>Adresse e-mail à confirmer</small>`}</div><div class="profile-actions"><button class="button secondary" data-action="open-profile">Modifier</button><button class="button outline" data-action="logout">Se déconnecter</button></div></article></section><section class="dashboard-section"><header><span>${icon("activity")}</span><div><p class="eyebrow">Mon activité</p><h2>Demandes et services</h2></div></header><div class="dashboard-grid"><article class="panel dashboard-card"><h3>Mes demandes</h3><ul class="profile-list">${requestItems}</ul></article><article class="panel dashboard-card"><h3>Mes offres de service</h3><ul class="profile-list">${serviceItems}</ul></article></div></section><section class="dashboard-section"><header><span>${icon("messages")}</span><div><p class="eyebrow">Mes échanges</p><h2>Conversations</h2></div></header><article class="panel exchange-card"><div><strong>${state.conversations.length}</strong><span>${state.conversations.length > 1 ? "conversations" : "conversation"}</span></div><button class="button secondary" data-action="view" data-view="messages">Ouvrir mes messages</button></article></section><section class="dashboard-section"><header><span>${icon("clock")}</span><div><p class="eyebrow">Mon suivi</p><h2>Indicateurs réels</h2></div></header><div class="tracking-grid"><article class="panel"><strong>${activeRequests}</strong><span>Demandes actives</span></article><article class="panel"><strong>${completedRequests}</strong><span>Demandes terminées</span></article><article class="panel"><strong>${visibleServices}</strong><span>Services visibles</span></article><article class="panel"><strong>${state.conversations.length}</strong><span>Échanges</span></article></div></section>${admin}</div></main>`;
 }
 function adminView() {
   const stats = state.adminStats || {};
@@ -556,7 +643,7 @@ async function prepareView(view) {
   if (view === "map") await loadMap();
   if (view === "messages") await loadConversations(true);
   if (view === "profile") {
-    await loadMine();
+    await Promise.all([loadMine(), loadConversations(false)]);
     if (state.user?.is_admin) state.adminStats = (await api("/api/admin/overview")).stats;
   }
   if (view === "admin" && state.user?.is_admin) state.adminStats = (await api("/api/admin/overview")).stats;
@@ -565,6 +652,7 @@ async function navigateToView(view, { replace = false, renderNow = true } = {}) 
   const target = routeForView[view] ? view : "map";
   state.view = target;
   state.selected = null;
+  state.mobileConversationOpen = false;
   await prepareView(target);
   const method = replace ? "replaceState" : "pushState";
   window.history[method]({ view: target }, "", routeForView[target]);
@@ -719,6 +807,7 @@ app.addEventListener("click", async (event) => {
       state.modal = "request";
       render();
     }
+    if (action === "locate-me") locateUser();
     if (action === "open-service") {
       state.modal = "service";
       render();
@@ -781,7 +870,13 @@ app.addEventListener("click", async (event) => {
         type,
         item: entries.find((entry) => entry.id === button.dataset.id),
       };
-      render();
+      const selection = document.querySelector(".selection");
+      if (selection) {
+        selection.innerHTML = `${selectedItem()}<details class="accessible-list"><summary>${translate(state.locale, "Liste accessible")}</summary>${accessibleMapList()}</details>`;
+        selection.classList.add("has-selection");
+        selection.scrollTop = 0;
+        localizeDom();
+      }
     }
     if (action === "conversation") {
       state.activeConversation = button.dataset.id;
@@ -789,7 +884,18 @@ app.addEventListener("click", async (event) => {
         `/api/conversations/${state.activeConversation}/messages`,
       );
       state.messages = messages.messages;
+      state.mobileConversationOpen = true;
+      if (window.matchMedia("(max-width: 760px)").matches) {
+        window.history.pushState({ view: "messages", conversation: state.activeConversation }, "", `${routeForView.messages}?conversation=${encodeURIComponent(state.activeConversation)}`);
+      }
       render();
+    }
+    if (action === "messages-back") {
+      if (new URLSearchParams(window.location.search).has("conversation")) window.history.back();
+      else {
+        state.mobileConversationOpen = false;
+        render();
+      }
     }
     if (action === "logout") {
       await api("/api/auth/logout", { method: "POST" });
@@ -841,6 +947,7 @@ window.addEventListener("popstate", async () => {
   }
   const view = viewForRoute[window.location.pathname] || "map";
   state.view = view;
+  state.mobileConversationOpen = view === "messages" && new URLSearchParams(window.location.search).has("conversation");
   await prepareView(view);
   render();
 });
