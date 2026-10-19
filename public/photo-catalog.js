@@ -11,7 +11,7 @@ export const photoCatalog = [
     credit: "Souhail BIDA",
     license: "Unsplash License",
     source: "https://unsplash.com/photos/a-group-of-people-walking-down-a-street-next-to-a-train-track-YGqVa6LBuak",
-    alt: { fr: "Des personnes se croisent dans un espace urbain a Rabat", en: "People crossing paths in an urban space in Rabat", ar: "أشخاص يلتقون في فضاء حضري بالرباط" },
+    alt: { fr: "Des personnes se croisent dans un espace urbain à Rabat", en: "People crossing paths in an urban space in Rabat", ar: "أشخاص يلتقون في فضاء حضري بالرباط" },
   },
   {
     id: "ma-marrakech-street",
@@ -36,10 +36,10 @@ export const photoCatalog = [
     colors: ["stone", "blue", "green"],
     orientation: "landscape",
     resolutions: { large: "/assets/scenes/paris-republique.webp" },
-    credit: "Barthelemy de Mazenod",
+    credit: "Barthélemy de Mazenod",
     license: "Unsplash License",
     source: "https://unsplash.com/photos/people-walking-on-street-during-daytime-rukoSoqUNvM",
-    alt: { fr: "Des personnes place de la Republique a Paris", en: "People in Place de la Republique in Paris", ar: "أشخاص في ساحة الجمهورية في باريس" },
+    alt: { fr: "Des personnes sur la place de la République à Paris", en: "People in Place de la République in Paris", ar: "أشخاص في ساحة الجمهورية في باريس" },
   },
   {
     id: "fr-paris-crossing",
@@ -67,7 +67,7 @@ export const photoCatalog = [
     credit: "Igor Oliyarnik",
     license: "Unsplash License",
     source: "https://unsplash.com/photos/people-in-a-street-during-daytime-ufm2_BJBRGc",
-    alt: { fr: "Des personnes sur la Plaza Mayor a Madrid", en: "People in Plaza Mayor in Madrid", ar: "أشخاص في ساحة بلازا مايور بمدريد" },
+    alt: { fr: "Des personnes sur la Plaza Mayor à Madrid", en: "People in Plaza Mayor in Madrid", ar: "أشخاص في ساحة بلازا مايور بمدريد" },
   },
   {
     id: "es-mallorca-street",
@@ -81,7 +81,7 @@ export const photoCatalog = [
     credit: "ZEIHLUND",
     license: "Unsplash License",
     source: "https://unsplash.com/photos/a-busy-street-with-many-people-qxOpHALiWQA",
-    alt: { fr: "Une rue animee a Majorque", en: "A lively street in Mallorca", ar: "شارع حيوي في مايوركا" },
+    alt: { fr: "Une rue animée à Majorque", en: "A lively street in Mallorca", ar: "شارع حيوي في مايوركا" },
   },
 ];
 

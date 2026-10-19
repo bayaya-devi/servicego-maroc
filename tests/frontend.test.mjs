@@ -26,7 +26,7 @@ test("critical member controls and three locales are present", async () => {
   assert.match(source, /open-quick/);
   assert.match(source, /accessibleMapList/);
   assert.match(source, /mapMode/);
-  assert.match(source, /uiTranslations/);
+  assert.match(source, /\/i18n\.js/);
   assert.match(source, /[\u0600-\u06ff]/);
 });
 
@@ -99,16 +99,60 @@ test("V2.1 signup, recovery and public information are complete", async () => {
 });
 
 test("the immediate-help CTA preserves request intent through authentication", async () => {
-  const [source, styles] = await Promise.all([read("public/app.js"), read("public/styles.css")]);
+  const [source, styles, i18n] = await Promise.all([read("public/app.js"), read("public/styles.css"), read("public/i18n.js")]);
   assert.match(source, /data-action="urgent-request"/);
   assert.match(source, /J'ai besoin d'aide maintenant/);
-  assert.match(source, /I need help now/);
-  assert.match(source, /أحتاج إلى المساعدة الآن/);
+  assert.match(i18n, /I need help now/);
+  assert.match(i18n, /أحتاج إلى المساعدة الآن/);
   assert.match(source, /state\.pendingIntent = "request"/);
   assert.match(source, /state\.authMode = "register"/);
   assert.match(source, /continueToRequest \? "request" : null/);
   assert.match(styles, /\.urgent-help-cta\s*\{[^}]*backdrop-filter:[^}]*animation:urgent-help-pulse/s);
   assert.match(styles, /\.discover-arrow,\.urgent-help-cta\s*\{\s*animation:none/);
+});
+
+test("the translation catalog is complete, normalized and valid UTF-8", async () => {
+  const { translationEntries, uiTranslations } = await import("../public/i18n.js");
+  const files = ["public/index.html", "public/app.js", "public/i18n.js", "public/photo-catalog.js", "public/styles.css", "public/tokens.css", "worker/index.ts"];
+  const decoder = new TextDecoder("utf-8", { fatal: true });
+  for (const file of files) {
+    const bytes = await readFile(new URL(`../${file}`, import.meta.url));
+    const value = decoder.decode(bytes);
+    assert.ok(!value.includes("�"), `${file} contains a replacement character`);
+    assert.equal(value, value.normalize("NFC"), `${file} is not normalized as NFC`);
+  }
+  const keys = translationEntries.map(([fr]) => fr);
+  assert.equal(new Set(keys).size, keys.length, "the translation catalog contains duplicate French keys");
+  for (const [fr, en, ar] of translationEntries) {
+    assert.ok(fr.trim() && en.trim() && ar.trim(), `incomplete translation for: ${fr}`);
+    assert.equal(uiTranslations.en[fr], en);
+    assert.equal(uiTranslations.ar[fr], ar);
+    assert.match(ar, /[\u0600-\u06ff]/, `Arabic translation missing Arabic characters for: ${fr}`);
+  }
+});
+
+test("every static interface label and API message has EN and AR translations", async () => {
+  const { uiTranslations } = await import("../public/i18n.js");
+  const [source, worker] = await Promise.all([read("public/app.js"), read("worker/index.ts")]);
+  const candidates = new Set();
+  for (const match of source.matchAll(/>([^<>{}\n]+)</g)) {
+    const value = match[1].trim();
+    if (/[A-Za-zÀ-ÿ]/.test(value)) candidates.add(value);
+  }
+  for (const match of source.matchAll(/(?:aria-label|placeholder)="([^"$]+)"/g)) candidates.add(match[1].trim());
+  for (const pattern of [/badRequest\("([^"]+)"/g, /(?:error|message): "([^"]+)"/g]) {
+    for (const match of worker.matchAll(pattern)) candidates.add(match[1].trim());
+  }
+  const allowed = new Set(["ServiceGO", "OpenStreetMap", "GO", "FR", "EN", "AR", "2D", "C+", "A/文", "i", "x", "×", "6 12 34 56 78", "aetbconseil@gmail.com", "`).join(\"\") : `"]);
+  const missing = [...candidates].filter((value) => !allowed.has(value) && (!uiTranslations.en[value] || !uiTranslations.ar[value]));
+  assert.deepEqual(missing, [], `missing translations: ${missing.join(" | ")}`);
+});
+
+test("French system copy has no known unaccented spellings", async () => {
+  const [source, worker] = await Promise.all([read("public/app.js"), read("worker/index.ts")]);
+  const forbidden = /\b(?:Apercu|Categorie|Completez|Creez|Creer|Ecrire|Menage|Methode|Prenom|Reessayez|Repondre|Reponse|Selection|Telephone|deconnecter|deja|envoyee|etes|meme|reponse|resultat|securisee|utilisee)\b/;
+  assert.doesNotMatch(source, forbidden);
+  assert.doesNotMatch(worker, forbidden);
 });
 
 test("photo selection is deterministic and falls back internationally", async () => {

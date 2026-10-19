@@ -156,7 +156,7 @@ function isResponse(value: User | Response): value is Response {
 }
 
 function requireVerifiedUser(user: User): Response | null {
-  return user.email_verified ? null : json({ error: "Confirmez votre adresse email avant de publier ou contacter un utilisateur." }, 403);
+  return user.email_verified ? null : json({ error: "Confirmez votre adresse e-mail avant de publier ou de contacter un utilisateur." }, 403);
 }
 
 async function createSession(userId: string, env: Env): Promise<string> {
@@ -247,11 +247,11 @@ async function handleAuth(request: Request, env: Env, ctx: ExecutionContext, pat
     )
       .bind(await tokenHash(token))
       .first<{ id: string; user_id: string; email: string }>();
-    if (!verification) return badRequest("Ce lien est invalide ou expire.");
+    if (!verification) return badRequest("Ce lien est invalide ou a expiré.");
     const existing = await env.DB.prepare("SELECT id FROM profiles WHERE email = ? AND id <> ?")
       .bind(verification.email, verification.user_id)
       .first<{ id: string }>();
-    if (existing) return badRequest("Cette adresse est deja utilisee.");
+    if (existing) return badRequest("Cette adresse e-mail est déjà utilisée.");
     await env.DB.batch([
       env.DB.prepare("UPDATE profiles SET email = ?, email_verified = 1, updated_at = CURRENT_TIMESTAMP WHERE id = ?")
         .bind(verification.email, verification.user_id),
@@ -269,29 +269,29 @@ async function handleAuth(request: Request, env: Env, ctx: ExecutionContext, pat
   if (pathname === "/api/auth/forgot-password" && request.method === "POST") {
     const body = await readBody(request);
     const email = text(body?.email, 254).toLowerCase();
-    if (!validEmail(email)) return badRequest("Indiquez une adresse email valide.");
+    if (!validEmail(email)) return badRequest("Indiquez une adresse e-mail valide.");
     const mailEnv = env as Env & { RESEND_API_KEY?: string; RESEND_FROM_EMAIL?: string };
     if (!mailEnv.RESEND_API_KEY || !mailEnv.RESEND_FROM_EMAIL) {
-      return json({ error: "La recuperation par email est temporairement indisponible: le service d'envoi n'est pas configure." }, 503);
+      return json({ error: "La récupération par e-mail est temporairement indisponible : le service d'envoi n'est pas configuré." }, 503);
     }
-    return json({ error: "La recuperation securisee du mot de passe n'est pas encore activee. Contactez aetbconseil@gmail.com." }, 503);
+    return json({ error: "La récupération sécurisée du mot de passe n'est pas encore activée. Contactez aetbconseil@gmail.com." }, 503);
   }
 
   if (pathname !== "/api/auth/register" && pathname !== "/api/auth/login") return null;
-  if (request.method !== "POST") return json({ error: "Methode non autorisee." }, 405);
+  if (request.method !== "POST") return json({ error: "Méthode non autorisée." }, 405);
   const body = await readBody(request);
   if (!body) return badRequest("Informations invalides.");
   const email = text(body.email, 254).toLowerCase();
   const password = text(body.password, 200);
-  if (!validEmail(email) || password.length < 8) return badRequest("Utilisez un email valide et un mot de passe de 8 caracteres minimum.");
+  if (!validEmail(email) || password.length < 8) return badRequest("Utilisez une adresse e-mail valide et un mot de passe d'au moins 8 caractères.");
 
   if (pathname === "/api/auth/register") {
     const fullName = text(body.full_name, 80);
-    const district = text(body.district, 80) || "Non renseignee";
-    if (fullName.length < 2) return badRequest("Indiquez votre prenom et nom.");
-    if (!(await verifyTurnstile(text(body.turnstile_token, 2048), request, env))) return badRequest("Verification anti-abus invalide.");
+    const district = text(body.district, 80) || "Non renseignée";
+    if (fullName.length < 2) return badRequest("Indiquez votre prénom et votre nom.");
+    if (!(await verifyTurnstile(text(body.turnstile_token, 2048), request, env))) return badRequest("La vérification anti-abus a échoué.");
     const exists = await env.DB.prepare("SELECT id FROM profiles WHERE email = ?").bind(email).first<{ id: string }>();
-    if (exists) return json({ error: "Cet email est deja utilise. Connectez-vous." }, 409);
+    if (exists) return json({ error: "Cette adresse e-mail est déjà utilisée. Connectez-vous." }, 409);
     const id = crypto.randomUUID();
     await env.DB.prepare("INSERT INTO profiles (id, email, password_hash, full_name, phone, district) VALUES (?, ?, ?, ?, ?, ?)")
       .bind(id, email, await passwordHash(password), fullName, text(body.phone, 30) || null, district)
@@ -311,7 +311,7 @@ async function handleAuth(request: Request, env: Env, ctx: ExecutionContext, pat
   )
     .bind(email)
     .first<AuthUser>();
-  if (!account || !(await passwordMatches(password, account.password_hash))) return json({ error: "Email ou mot de passe incorrect." }, 401);
+  if (!account || !(await passwordMatches(password, account.password_hash))) return json({ error: "Adresse e-mail ou mot de passe incorrect." }, 401);
   const sessionId = await createSession(account.id, env);
   const { password_hash: _passwordHash, ...user } = account;
   return json({ user }, 200, { "set-cookie": sessionCookie(sessionId, request) });
@@ -379,7 +379,7 @@ async function handleApi(request: Request, env: Env, ctx: ExecutionContext): Pro
     const phone = text(body.phone, 30);
     const district = text(body.district, 80);
     const bio = text(body.bio, 500);
-    if (fullName.length < 2) return badRequest("Indiquez votre prenom et nom.");
+    if (fullName.length < 2) return badRequest("Indiquez votre prénom et votre nom.");
     await env.DB.prepare("UPDATE profiles SET full_name = ?, phone = ?, district = ?, bio = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?")
       .bind(fullName, phone || null, district || "Rabat", bio || null, user.id)
       .run();
@@ -393,7 +393,7 @@ async function handleApi(request: Request, env: Env, ctx: ExecutionContext): Pro
     if (!body) return badRequest("Informations invalides.");
     const currentPassword = text(body.current_password, 200);
     const newPassword = text(body.new_password, 200);
-    if (newPassword.length < 8) return badRequest("Le nouveau mot de passe doit avoir 8 caracteres minimum.");
+    if (newPassword.length < 8) return badRequest("Le nouveau mot de passe doit comporter au moins 8 caractères.");
     const account = await env.DB.prepare("SELECT password_hash FROM profiles WHERE id = ?").bind(user.id).first<{ password_hash: string }>();
     if (!account || !(await passwordMatches(currentPassword, account.password_hash))) return json({ error: "Mot de passe actuel incorrect." }, 401);
     await env.DB.prepare("UPDATE profiles SET password_hash = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?")
@@ -410,31 +410,31 @@ async function handleApi(request: Request, env: Env, ctx: ExecutionContext): Pro
     const nextEmail = text(body.new_email, 254).toLowerCase();
     const currentPassword = text(body.current_password, 200);
     if (!validEmail(nextEmail) || !currentPassword) return badRequest("Indiquez une nouvelle adresse valide et votre mot de passe actuel.");
-    if (nextEmail === user.email) return badRequest("C'est deja votre adresse actuelle.");
+    if (nextEmail === user.email) return badRequest("C'est déjà votre adresse actuelle.");
     const exists = await env.DB.prepare("SELECT id FROM profiles WHERE email = ?").bind(nextEmail).first<{ id: string }>();
-    if (exists) return json({ error: "Cette adresse est deja utilisee." }, 409);
+    if (exists) return json({ error: "Cette adresse e-mail est déjà utilisée." }, 409);
     const account = await env.DB.prepare("SELECT password_hash FROM profiles WHERE id = ?").bind(user.id).first<{ password_hash: string }>();
     if (!account || !(await passwordMatches(currentPassword, account.password_hash))) return json({ error: "Mot de passe actuel incorrect." }, 401);
     const token = await createEmailVerification(env, user.id, nextEmail, "change_email");
     ctx.waitUntil(sendVerificationEmail(env, nextEmail, user.full_name, token, new URL(request.url).origin, "change_email"));
-    return json({ message: "Un lien de confirmation a ete envoye a la nouvelle adresse." }, 202);
+    return json({ message: "Un lien de confirmation a été envoyé à la nouvelle adresse." }, 202);
   }
 
   if (pathname === "/api/auth/resend-verification" && request.method === "POST") {
     const user = await requireUser(request, env);
     if (isResponse(user)) return user;
-    if (user.email_verified) return badRequest("Votre adresse est deja confirmee.");
+    if (user.email_verified) return badRequest("Votre adresse est déjà confirmée.");
     const mailEnv = env as Env & { RESEND_API_KEY?: string; RESEND_FROM_EMAIL?: string };
-    if (!mailEnv.RESEND_API_KEY || !mailEnv.RESEND_FROM_EMAIL) return json({ error: "L'envoi d'email n'est pas encore configure." }, 503);
+    if (!mailEnv.RESEND_API_KEY || !mailEnv.RESEND_FROM_EMAIL) return json({ error: "L'envoi d'e-mails n'est pas encore configuré." }, 503);
     const token = await createEmailVerification(env, user.id, user.email, "signup");
     ctx.waitUntil(sendVerificationEmail(env, user.email, user.full_name, token, new URL(request.url).origin, "signup"));
-    return json({ message: "Un nouveau lien de confirmation a ete envoye." }, 202);
+    return json({ message: "Un nouveau lien de confirmation a été envoyé." }, 202);
   }
 
   if (pathname === "/api/admin/overview" && request.method === "GET") {
     const user = await requireUser(request, env);
     if (isResponse(user)) return user;
-    if (!user.is_admin) return json({ error: "Acces administrateur requis." }, 403);
+    if (!user.is_admin) return json({ error: "Accès administrateur requis." }, 403);
     const stats = await env.DB.prepare(
       `SELECT
         (SELECT COUNT(*) FROM profiles WHERE is_active = 1) AS users,
@@ -472,10 +472,10 @@ async function handleApi(request: Request, env: Env, ctx: ExecutionContext): Pro
     const longitude = Number(body.longitude);
     const urgency = body.urgency === "urgent" ? "urgent" : "normal";
     if (!categoryId || title.length < 3 || description.length < 5 || !insideMorocco(latitude, longitude)) {
-      return badRequest("Completez la demande et choisissez une position au Maroc.");
+      return badRequest("Complétez la demande et choisissez une position au Maroc.");
     }
     const category = await env.DB.prepare("SELECT id FROM categories WHERE id = ?").bind(categoryId).first<{ id: string }>();
-    if (!category) return badRequest("Categorie inconnue.");
+    if (!category) return badRequest("Catégorie inconnue.");
     const id = crypto.randomUUID();
     await env.DB.prepare(
       `INSERT INTO service_requests (id, requester_id, category_id, title, description, district, latitude, longitude, urgency, budget_hint, photo_key)
@@ -512,10 +512,10 @@ async function handleApi(request: Request, env: Env, ctx: ExecutionContext): Pro
     const latitude = Number(body.latitude);
     const longitude = Number(body.longitude);
     if (!categoryId || title.length < 3 || description.length < 5 || !insideMorocco(latitude, longitude)) {
-      return badRequest("Completez le service et choisissez une position au Maroc.");
+      return badRequest("Complétez le service et choisissez une position au Maroc.");
     }
     const category = await env.DB.prepare("SELECT id FROM categories WHERE id = ?").bind(categoryId).first<{ id: string }>();
-    if (!category) return badRequest("Categorie inconnue.");
+    if (!category) return badRequest("Catégorie inconnue.");
     const id = crypto.randomUUID();
     await env.DB.prepare(
       `INSERT INTO user_services (id, user_id, category_id, title, description, district, latitude, longitude, price_hint)
@@ -554,20 +554,20 @@ async function handleApi(request: Request, env: Env, ctx: ExecutionContext): Pro
       .bind(offerMatch[1])
       .first<{ id: string; requester_id: string; title: string }>();
     if (!requestItem) return notFound();
-    if (requestItem.requester_id === user.id) return badRequest("Vous ne pouvez pas repondre a votre propre demande.");
+    if (requestItem.requester_id === user.id) return badRequest("Vous ne pouvez pas répondre à votre propre demande.");
     const message = text(body.message, 1000);
-    if (message.length < 3) return badRequest("Ecrivez une courte reponse.");
+    if (message.length < 3) return badRequest("Écrivez une courte réponse.");
     const id = crypto.randomUUID();
     try {
       await env.DB.prepare("INSERT INTO offers (id, request_id, provider_id, message, price_hint) VALUES (?, ?, ?, ?, ?)")
         .bind(id, requestItem.id, user.id, message, text(body.price_hint, 80) || null)
         .run();
     } catch {
-      return json({ error: "Vous avez deja repondu a cette demande." }, 409);
+      return json({ error: "Vous avez déjà répondu à cette demande." }, 409);
     }
     const requester = await env.DB.prepare("SELECT email, full_name FROM profiles WHERE id = ?").bind(requestItem.requester_id).first<{ email: string; full_name: string }>();
-    if (requester) ctx.waitUntil(sendEmail(env, requester.email, "Nouvelle reponse sur ServiceGO", `<p>Bonjour ${escapeHtml(requester.full_name)},</p><p>${escapeHtml(user.full_name)} a repondu a votre demande: ${escapeHtml(requestItem.title)}.</p>`));
-    return json({ id, message: "Votre reponse a ete envoyee." }, 201);
+    if (requester) ctx.waitUntil(sendEmail(env, requester.email, "Nouvelle réponse sur ServiceGO", `<p>Bonjour ${escapeHtml(requester.full_name)},</p><p>${escapeHtml(user.full_name)} a répondu à votre demande : ${escapeHtml(requestItem.title)}.</p>`));
+    return json({ id, message: "Votre réponse a été envoyée." }, 201);
   }
 
   const acceptMatch = pathname.match(/^\/api\/offers\/([^/]+)\/accept$/);
@@ -589,7 +589,7 @@ async function handleApi(request: Request, env: Env, ctx: ExecutionContext): Pro
       env.DB.prepare("UPDATE service_requests SET status = 'assigned', updated_at = CURRENT_TIMESTAMP WHERE id = ?").bind(offer.request_id),
     ]);
     const conversationId = await findOrCreateConversation(env, offer.request_id, user.id, offer.provider_id);
-    return json({ conversation_id: conversationId, message: "Reponse acceptee. La discussion est ouverte." });
+    return json({ conversation_id: conversationId, message: "Réponse acceptée. La discussion est ouverte." });
   }
 
   const serviceRequestMatch = pathname.match(/^\/api\/services\/([^/]+)\/request$/);
@@ -621,7 +621,7 @@ async function handleApi(request: Request, env: Env, ctx: ExecutionContext): Pro
     await env.DB.prepare("INSERT INTO messages (id, conversation_id, sender_id, body) VALUES (?, ?, ?, ?)")
       .bind(crypto.randomUUID(), conversationId, user.id, description)
       .run();
-    return json({ request_id: requestId, conversation_id: conversationId, message: "Votre demande a ete envoyee directement." }, 201);
+    return json({ request_id: requestId, conversation_id: conversationId, message: "Votre demande a été envoyée directement." }, 201);
   }
 
   if (pathname === "/api/conversations" && request.method === "GET") {
@@ -663,7 +663,7 @@ async function handleApi(request: Request, env: Env, ctx: ExecutionContext): Pro
       if (verificationError) return verificationError;
       const body = await readBody(request);
       const message = text(body?.body, 2000);
-      if (!message) return badRequest("Ecrivez un message.");
+      if (!message) return badRequest("Écrivez un message.");
       await env.DB.batch([
         env.DB.prepare("INSERT INTO messages (id, conversation_id, sender_id, body) VALUES (?, ?, ?, ?)")
           .bind(crypto.randomUUID(), conversation.id, user.id, message),
@@ -671,7 +671,7 @@ async function handleApi(request: Request, env: Env, ctx: ExecutionContext): Pro
       ]);
       return json({ ok: true }, 201);
     }
-    return json({ error: "Methode non autorisee." }, 405);
+    return json({ error: "Méthode non autorisée." }, 405);
   }
 
   if (pathname === "/api/uploads" && request.method === "POST") {
@@ -684,7 +684,7 @@ async function handleApi(request: Request, env: Env, ctx: ExecutionContext): Pro
     const form = await request.formData();
     const file = form.get("file");
     if (!(file instanceof File) || file.size === 0 || file.size > 6 * 1024 * 1024) return badRequest("Choisissez une image de 6 Mo maximum.");
-    if (!file.type.startsWith("image/")) return badRequest("Seules les images sont acceptees.");
+    if (!file.type.startsWith("image/")) return badRequest("Seules les images sont acceptées.");
     const extension = file.name.split(".").pop()?.toLowerCase().replace(/[^a-z0-9]/g, "") || "jpg";
     const key = `uploads/${user.id}/${crypto.randomUUID()}.${extension}`;
     await uploads.put(key, file.stream(), { httpMetadata: { contentType: file.type }, customMetadata: { userId: user.id } });
@@ -717,7 +717,7 @@ export default {
     } catch (error) {
       const message = error instanceof Error ? error.message : "unknown";
       console.error(JSON.stringify({ event: "api_error", path: url.pathname, message }));
-      return json({ error: "Une erreur est survenue. Reessayez." }, 500);
+      return json({ error: "Une erreur est survenue. Réessayez." }, 500);
     }
   },
 } satisfies ExportedHandler<Env>;

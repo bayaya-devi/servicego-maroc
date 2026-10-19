@@ -38,16 +38,16 @@ async function captureSuite(browser, prefix, viewport) {
   await capture(page, prefix, "06-nucleus-open");
   await page.getByRole("button", { name: "Connexion", exact: true }).click();
   await capture(page, prefix, "07-login");
-  await page.getByRole("button", { name: "Creer un compte", exact: true }).click();
+  await page.getByRole("button", { name: "Créer un compte", exact: true }).click();
   await capture(page, prefix, "08-register");
   await page.getByRole("button", { name: "Fermer", exact: true }).click();
 
   await page.getByRole("button", { name: "Plus", exact: true }).click();
-  await page.getByRole("button", { name: "Questions frequentes", exact: true }).click();
+  await page.getByRole("button", { name: "Questions fréquentes", exact: true }).click();
   await capture(page, prefix, "09-faq");
   await page.getByRole("button", { name: "Fermer", exact: true }).click();
   await page.getByRole("button", { name: "Plus", exact: true }).click();
-  await page.getByRole("button", { name: "Informations legales", exact: true }).click();
+  await page.getByRole("button", { name: "Informations légales", exact: true }).click();
   await capture(page, prefix, "10-legal");
   await page.getByRole("button", { name: "Fermer", exact: true }).click();
   await page.getByRole("button", { name: "Plus", exact: true }).click();
@@ -77,11 +77,13 @@ async function validateResponsive(browser) {
         titleInside: inside(document.querySelector("#story-title")),
         phoneInside: inside(document.querySelector(".device-perspective")),
         direction: document.documentElement.dir,
+        fontFamily: getComputedStyle(document.body).fontFamily,
       };
     });
     assert.ok(layout.overflow <= 1, `${width}px ${locale}: horizontal overflow ${layout.overflow}px`);
     assert.ok(layout.titleInside && layout.phoneInside, `${width}px ${locale}: first moment leaves the viewport`);
     assert.equal(layout.direction, locale === "ar" ? "rtl" : "ltr");
+    if (locale === "ar") assert.match(layout.fontFamily, /Noto Sans Arabic/);
     await page.locator('[data-action="toggle-public-menu"]').click();
     const nucleusInside = await page.locator(".public-nucleus nav").evaluate((element) => {
       const rect = element.getBoundingClientRect();
@@ -112,6 +114,58 @@ const testUser = {
 async function mockMemberApis(page) {
   await page.route("**/api/map", (route) => route.fulfill({ json: { requests: [], services: [] } }));
   await page.route("**/api/categories", (route) => route.fulfill({ json: { categories: [{ id: "cat-1", name: "Plomberie", icon: "tool" }] } }));
+}
+
+async function validateLocalizedMemberViews(browser) {
+  const cases = [
+    ["fr", { width: 1440, height: 900 }, "Services autour de vous", "Quel besoin avez-vous ?", "Vos discussions", "Votre compte ServiceGO", "Tableau de bord"],
+    ["en", { width: 1440, height: 900 }, "Services near you", "What do you need?", "Your conversations", "Your ServiceGO account", "Dashboard"],
+    ["ar", { width: 1440, height: 900 }, "خدمات قريبة منك", "ما الخدمة التي تحتاجها؟", "محادثاتك", "حسابك في ServiceGO", "لوحة التحكم"],
+    ["fr", { width: 390, height: 844 }, "Services autour de vous", "Quel besoin avez-vous ?", "Vos discussions", "Votre compte ServiceGO", "Tableau de bord"],
+    ["en", { width: 390, height: 844 }, "Services near you", "What do you need?", "Your conversations", "Your ServiceGO account", "Dashboard"],
+    ["ar", { width: 390, height: 844 }, "خدمات قريبة منك", "ما الخدمة التي تحتاجها؟", "محادثاتك", "حسابك في ServiceGO", "لوحة التحكم"],
+  ];
+  for (const [locale, viewport, mapTitle, requestTitle, messagesTitle, profileTitle, adminTitle] of cases) {
+    const page = await browser.newPage({ viewport });
+    const errors = [];
+    page.on("pageerror", (error) => errors.push(error.message));
+    await page.addInitScript((value) => localStorage.setItem("servicego-locale", value), locale);
+    await page.route("**/api/me", (route) => route.fulfill({ json: { user: { ...testUser, is_admin: 1 } } }));
+    await mockMemberApis(page);
+    await page.route("**/api/conversations", (route) => route.fulfill({ json: { conversations: [] } }));
+    await page.route("**/api/requests", (route) => route.fulfill({ json: { requests: [] } }));
+    await page.route("**/api/services", (route) => route.fulfill({ json: { services: [] } }));
+    await page.route("**/api/admin/overview", (route) => route.fulfill({ json: { stats: { users: 3, open_requests: 1, active_services: 2, conversations: 1 } } }));
+    await page.goto(baseUrl, { waitUntil: "networkidle" });
+    assert.ok(await page.getByText(mapTitle, { exact: true }).isVisible(), `${locale} ${viewport.width}: map copy is not localized`);
+    await page.locator('[data-action="open-request"]').first().click();
+    assert.ok(await page.getByRole("heading", { name: requestTitle, exact: true }).isVisible());
+    await page.locator('[data-action="close-modal"]').click();
+
+    const nav = viewport.width <= 760 ? ".mobile-tabbar" : ".topbar";
+    await page.locator(`${nav} [data-view="messages"]`).click();
+    await page.getByRole("heading", { name: messagesTitle, exact: true }).waitFor();
+    await page.locator(`${nav} [data-view="profile"]`).click();
+    await page.getByRole("heading", { name: profileTitle, exact: true }).waitFor();
+    await page.locator('[data-action="open-profile"]').click();
+    assert.ok(await page.locator('form[data-form="profile"]').isVisible());
+    await page.locator('[data-action="close-modal"]').click();
+    await page.locator('.topbar [data-view="admin"]').evaluate((button) => button.click());
+    await page.getByRole("heading", { name: adminTitle, exact: true }).waitFor();
+
+    const state = await page.evaluate(() => ({
+      overflow: document.documentElement.scrollWidth - innerWidth,
+      replacementCharacter: document.body.innerText.includes("�"),
+      direction: document.documentElement.dir,
+      language: document.documentElement.lang,
+    }));
+    assert.ok(state.overflow <= 1, `${locale} ${viewport.width}: member view overflows by ${state.overflow}px`);
+    assert.equal(state.replacementCharacter, false);
+    assert.equal(state.language, locale);
+    assert.equal(state.direction, locale === "ar" ? "rtl" : "ltr");
+    assert.deepEqual(errors, [], `${locale} ${viewport.width}: member-view browser errors`);
+    await page.close();
+  }
 }
 
 async function validateUrgentIntent(browser) {
@@ -161,18 +215,23 @@ async function validateUrgentIntent(browser) {
   ].filter(Boolean);
   const executablePath = chromeCandidates.find(existsSync);
   const browser = await chromium.launch({ headless: true, ...(executablePath ? { executablePath } : {}) });
-  await captureSuite(browser, "desktop-1440x900", { width: 1440, height: 900 });
-  await captureSuite(browser, "mobile-390x844", { width: 390, height: 844 });
-  await validateResponsive(browser);
-  await validateUrgentIntent(browser);
+  if (!process.env.SERVICEGO_I18N_ONLY) {
+    await captureSuite(browser, "desktop-1440x900", { width: 1440, height: 900 });
+    await captureSuite(browser, "mobile-390x844", { width: 390, height: 844 });
+    await validateResponsive(browser);
+    await validateUrgentIntent(browser);
+  }
+  await validateLocalizedMemberViews(browser);
 
-  const rtl = await browser.newPage({ viewport: { width: 390, height: 844 }, reducedMotion: "no-preference" });
-  await rtl.addInitScript(() => localStorage.setItem("servicego-locale", "ar"));
-  await rtl.goto(baseUrl, { waitUntil: "networkidle" });
-  await rtl.getByRole("button", { name: "المزيد", exact: true }).click();
-  await rtl.getByRole("button", { name: "الأسئلة الشائعة", exact: true }).click();
-  await capture(rtl, "mobile-390x844", "12-arabic-rtl");
-  await rtl.close();
+  if (!process.env.SERVICEGO_I18N_ONLY) {
+    const rtl = await browser.newPage({ viewport: { width: 390, height: 844 }, reducedMotion: "no-preference" });
+    await rtl.addInitScript(() => localStorage.setItem("servicego-locale", "ar"));
+    await rtl.goto(baseUrl, { waitUntil: "networkidle" });
+    await rtl.getByRole("button", { name: "المزيد", exact: true }).click();
+    await rtl.getByRole("button", { name: "الأسئلة الشائعة", exact: true }).click();
+    await capture(rtl, "mobile-390x844", "12-arabic-rtl");
+    await rtl.close();
+  }
   await browser.close();
   console.log(`Visual captures written to ${output}`);
 })().catch((error) => {
