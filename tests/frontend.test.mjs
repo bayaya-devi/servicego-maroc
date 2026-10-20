@@ -21,6 +21,18 @@ test("official semantic colors and responsive rules are centralized", async () =
   assert.match(styles, /\[dir="rtl"\]/);
 });
 
+test("the Premium layer defines three glass levels and adaptive experiences", async () => {
+  const [html, premium] = await Promise.all([read("public/index.html"), read("public/premium.css")]);
+  assert.match(html, /premium\.css/);
+  for (const token of ["--sg-glass-1", "--sg-glass-2", "--sg-glass-3"]) assert.match(premium, new RegExp(token));
+  assert.match(premium, /@media \(min-width: 761px\) and \(max-width: 1024px\)/);
+  assert.match(premium, /@media \(max-width: 760px\)/);
+  assert.match(premium, /prefers-color-scheme: dark/);
+  assert.match(premium, /prefers-reduced-motion: reduce/);
+  assert.match(premium, /@supports not \(backdrop-filter: blur\(1px\)\)/);
+  assert.match(premium, /\[dir="rtl"\]/);
+});
+
 test("critical member controls and three locales are present", async () => {
   const source = await read("public/app.js");
   assert.match(source, /open-quick/);
@@ -173,7 +185,7 @@ test("the V2.3 member experience keeps the worldwide map, rich messaging and das
 
 test("the translation catalog is complete, normalized and valid UTF-8", async () => {
   const { translationEntries, uiTranslations } = await import("../public/i18n.js");
-  const files = ["public/index.html", "public/app.js", "public/i18n.js", "public/photo-catalog.js", "public/styles.css", "public/tokens.css", "worker/index.ts"];
+  const files = ["public/index.html", "public/app.js", "public/i18n.js", "public/photo-catalog.js", "public/styles.css", "public/premium.css", "public/tokens.css", "worker/index.ts"];
   const decoder = new TextDecoder("utf-8", { fatal: true });
   for (const file of files) {
     const bytes = await readFile(new URL(`../${file}`, import.meta.url));

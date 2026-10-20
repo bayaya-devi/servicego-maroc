@@ -70,6 +70,7 @@ async function mockApis(page, writes) {
 
 async function shot(page, name) {
   if (process.env.SERVICEGO_VALIDATE_ONLY === "1") return;
+  await page.waitForTimeout(550);
   await page.screenshot({ path: path.join(output, `${name}.jpg`), type: "jpeg", quality: 82, fullPage: false });
 }
 
