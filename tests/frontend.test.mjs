@@ -167,8 +167,8 @@ test("the V2.3 member experience keeps the worldwide map, rich messaging and das
   assert.match(readCursorMigration, /last_message_rowid/);
   assert.match(worker, /m\.rowid > COALESCE/);
   assert.match(conversationMigration, /CREATE UNIQUE INDEX IF NOT EXISTS conversations_request_pair_unique/);
-  assert.match(worker, /async scheduled/);
-  assert.match(wrangler, /"crons": \["17 3 \* \* \*"\]/);
+  assert.match(worker, /refreshProfileRating\(env, user\.id\)/);
+  assert.doesNotMatch(wrangler, /"crons"/);
 });
 
 test("the translation catalog is complete, normalized and valid UTF-8", async () => {

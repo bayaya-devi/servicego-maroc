@@ -771,6 +771,10 @@ async function loadConversations(selectFirst = false) {
 async function loadActivity() {
   const data = await api("/api/activity");
   state.activity = { replied: data.replied || [], reviews: data.reviews || [] };
+  if (state.user && Number.isFinite(Number(data.rating))) {
+    state.user.rating = Number(data.rating);
+    state.user.review_count = Number(data.review_count || 0);
+  }
 }
 async function prepareView(view) {
   if (view === "map") await loadMap();

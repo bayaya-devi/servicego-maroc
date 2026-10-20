@@ -260,18 +260,18 @@ async function findOrCreateConversation(env: Env, requestId: string, firstUserId
   }
 }
 
-async function refreshPublishedRatings(env: Env): Promise<void> {
+async function refreshProfileRating(env: Env, profileId: string): Promise<{ rating: number; review_count: number }> {
+  const aggregate = await env.DB.prepare(
+    `SELECT ROUND(AVG(rv.rating), 2) AS rating, COUNT(*) AS review_count FROM reviews rv
+     WHERE rv.reviewed_id = ? AND (rv.publish_after <= CURRENT_TIMESTAMP OR
+       (SELECT COUNT(*) FROM reviews pair WHERE pair.request_id = rv.request_id) >= 2)`,
+  ).bind(profileId).first<{ rating: number | null; review_count: number }>();
+  const rating = aggregate?.rating ?? 5;
+  const reviewCount = aggregate?.review_count ?? 0;
   await env.DB.prepare(
-    `UPDATE profiles SET
-       rating = COALESCE((SELECT ROUND(AVG(rv.rating), 2) FROM reviews rv
-         WHERE rv.reviewed_id = profiles.id AND (rv.publish_after <= CURRENT_TIMESTAMP OR
-           (SELECT COUNT(*) FROM reviews pair WHERE pair.request_id = rv.request_id) >= 2)), 5),
-       review_count = (SELECT COUNT(*) FROM reviews rv
-         WHERE rv.reviewed_id = profiles.id AND (rv.publish_after <= CURRENT_TIMESTAMP OR
-           (SELECT COUNT(*) FROM reviews pair WHERE pair.request_id = rv.request_id) >= 2)),
-       updated_at = CURRENT_TIMESTAMP
-     WHERE EXISTS (SELECT 1 FROM reviews rv WHERE rv.reviewed_id = profiles.id)`,
-  ).run();
+    "UPDATE profiles SET rating = ?, review_count = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+  ).bind(rating, reviewCount, profileId).run();
+  return { rating, review_count: reviewCount };
 }
 
 async function handleAuth(request: Request, env: Env, ctx: ExecutionContext, pathname: string): Promise<Response | null> {
@@ -741,7 +741,7 @@ async function handleApi(request: Request, env: Env, ctx: ExecutionContext): Pro
   if (pathname === "/api/activity" && request.method === "GET") {
     const user = await requireUser(request, env);
     if (isResponse(user)) return user;
-    const [replied, reviews] = await Promise.all([
+    const [replied, reviews, profileRating] = await Promise.all([
       env.DB.prepare(
         `SELECT r.id, r.title, r.status, r.completed_at, o.status AS offer_status
          FROM offers o JOIN service_requests r ON r.id = o.request_id
@@ -754,8 +754,9 @@ async function handleApi(request: Request, env: Env, ctx: ExecutionContext): Pro
            (SELECT COUNT(*) FROM reviews pair WHERE pair.request_id = rv.request_id) >= 2)
          ORDER BY rv.created_at DESC LIMIT 50`,
       ).bind(user.id).all(),
+      refreshProfileRating(env, user.id),
     ]);
-    return json({ replied: replied.results, reviews: reviews.results });
+    return json({ replied: replied.results, reviews: reviews.results, ...profileRating });
   }
 
   if (pathname === "/api/conversations" && request.method === "GET") {
@@ -882,8 +883,5 @@ export default {
       console.error(JSON.stringify({ event: "api_error", path: url.pathname, message }));
       return json({ error: "Une erreur est survenue. Réessayez." }, 500);
     }
-  },
-  async scheduled(_controller, env, ctx): Promise<void> {
-    ctx.waitUntil(refreshPublishedRatings(env));
   },
 } satisfies ExportedHandler<Env>;
