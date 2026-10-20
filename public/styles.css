@@ -272,12 +272,12 @@ body.modal-open { overflow:hidden }
 .profile-glyph::before { content:"";position:absolute;left:50%;top:-5px;width:7px;height:7px;border:2px solid currentColor;border-radius:50%;background:transparent;transform:translateX(-50%) }
 .story-v21 { position:relative;height:390svh;color:#fff;background:#193544 }
 .story-scroll { position:absolute;inset:0;pointer-events:none }.story-scroll span { position:absolute;height:1px }.story-scroll span:nth-child(1) { top:0 }.story-scroll span:nth-child(2) { top:32% }.story-scroll span:nth-child(3) { top:74% }
-.story-viewport { position:sticky;top:0;height:100svh;overflow:hidden;isolation:isolate }
-.story-photo { position:absolute;z-index:-5;inset:-4%;background-position:center;background-size:cover;transform:scale(var(--photo-scale,1.06));will-change:transform,opacity }
+.story-viewport { position:sticky;top:0;height:100svh;overflow:hidden;isolation:isolate;background:#071722 }
+.story-photo { position:absolute;z-index:0;inset:-4%;background-position:center;background-size:cover;transform:scale(var(--photo-scale,1.06));will-change:transform,opacity }
 .photo-one { background-image:var(--photo-one);opacity:calc(1 - var(--conclusion-progress,0)) }
 .photo-two { background-image:var(--photo-two);opacity:var(--conclusion-progress,0) }
-.story-light { position:absolute;z-index:-4;inset:0;background:linear-gradient(90deg,rgba(13,35,48,.84),rgba(18,49,58,.48) 50%,rgba(13,35,48,.2)),linear-gradient(180deg,rgba(37,133,230,.12),rgba(67,198,165,.12) 52%,rgba(255,145,56,.25));backdrop-filter:saturate(.82);transition:background .2s linear }
-.narrative { position:absolute;inset:0;display:grid;place-items:center;padding:82px max(5vw,24px) 54px;pointer-events:none;will-change:opacity,transform }
+.story-light { position:absolute;z-index:1;inset:0;background:linear-gradient(90deg,rgba(13,35,48,.84),rgba(18,49,58,.48) 50%,rgba(13,35,48,.2)),linear-gradient(180deg,rgba(37,133,230,.12),rgba(67,198,165,.12) 52%,rgba(255,145,56,.25));backdrop-filter:saturate(.82);transition:background .2s linear }
+.narrative { position:absolute;z-index:2;inset:0;display:grid;place-items:center;padding:82px max(5vw,24px) 54px;pointer-events:none;will-change:opacity,transform }
 .moment-one { grid-template-columns:minmax(320px,.9fr) minmax(290px,.62fr);gap:5vw;opacity:var(--moment-one-opacity,1) }
 .moment-one .discovery-copy { justify-self:start;align-self:center }
 .moment-one h1 { max-width:740px;margin:0;color:#fff;font-size:clamp(46px,5.5vw,82px);line-height:1.01;letter-spacing:0;text-wrap:balance;text-shadow:0 3px 34px rgba(6,22,34,.48) }
@@ -347,6 +347,17 @@ body.modal-open { overflow:hidden }
 @media (prefers-reduced-motion:reduce) {
   .story-v21 { height:auto;min-height:300svh }.story-viewport { position:relative;height:auto;min-height:300svh;display:grid }.narrative { position:relative;min-height:100svh;opacity:1!important;transform:none!important }.story-photo { position:fixed;transform:none }.moment-two .character,.moment-three .character { transform:none!important;animation:none }.moment-two h2,.moment-two .possibility-actions,.moment-two .meeting-light { opacity:1!important;transform:none }.moment-two .story-content,.moment-three .story-content { pointer-events:auto }.device-perspective { opacity:1;transform:none }.smartphone { transform:none }.discover-arrow,.urgent-help-cta { animation:none }
 }
+
+/* The story remains usable if a scroll calculation or an enhancement fails. */
+.story-v21.story-static { height:auto;min-height:300svh }
+.story-static .story-viewport { position:relative;height:auto;min-height:300svh;display:grid;overflow:visible }
+.story-static .story-photo { position:fixed;inset:-4%;transform:none!important }
+.story-static .photo-one { opacity:1!important }.story-static .photo-two { opacity:0!important }
+.story-static .story-light { position:fixed }
+.story-static .narrative { position:relative;min-height:100svh;opacity:1!important;transform:none!important;pointer-events:auto }
+.story-static .moment-two .character,.story-static .moment-three .character { transform:none!important;opacity:1!important;animation:none }
+.story-static .moment-two h2,.story-static .moment-two .possibility-actions,.story-static .moment-two .meeting-light { opacity:1!important;transform:none!important }
+.story-static .moment-two .story-content,.story-static .moment-three .story-content { pointer-events:auto }
 
 /* V2.2 final cascade */
 .public-nucleus nav { background:rgba(238,248,250,.46);border-color:rgba(255,255,255,.54);box-shadow:0 12px 38px rgba(16,40,58,.12) }

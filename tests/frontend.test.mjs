@@ -90,6 +90,18 @@ test("V2.1 uses one scroll-driven viewport with a real marketing map", async () 
   assert.doesNotMatch(source, />Découvrir <span/);
 });
 
+test("the public story keeps a sticky viewport and a visible fallback", async () => {
+  const [source, styles, premium] = await Promise.all([read("public/app.js"), read("public/styles.css"), read("public/premium.css")]);
+  assert.match(styles, /\.story-viewport\s*\{[^}]*position:sticky[^}]*background:/s);
+  assert.match(styles, /\.story-photo\s*\{[^}]*z-index:0/s);
+  assert.match(styles, /\.narrative\s*\{[^}]*z-index:2/s);
+  assert.match(styles, /\.story-v21\.story-static/);
+  assert.match(source, /function activateStoryFallback/);
+  assert.match(source, /window\.addEventListener\("pageshow", scheduleStoryProgress\)/);
+  assert.match(source, /window\.addEventListener\("resize", scheduleStoryProgress/);
+  assert.doesNotMatch(premium, /html\s*\{\s*overflow-x:\s*clip/);
+});
+
 test("V2.2 public nucleus keeps one visual language and exposes the required actions", async () => {
   const [source, styles] = await Promise.all([read("public/app.js"), read("public/styles.css")]);
   assert.match(source, /class="nucleus-secondary"/);

@@ -36,8 +36,6 @@ html[data-theme="dark"] {
   --sg-shadow-immersive: 0 40px 120px rgba(0, 0, 0, .48), inset 0 1px 0 rgba(255, 255, 255, .1);
 }
 
-html { overflow-x: clip; }
-
 body {
   color: var(--sg-ink);
   background: var(--sg-premium-canvas);
@@ -47,6 +45,9 @@ body {
 
 html[data-theme="dark"] body { background: var(--sg-canvas); }
 [dir="rtl"] body { font-family: var(--sg-font-ar); }
+
+/* Member tooltips may extend beyond their compact navigation; never widen the document. */
+body[data-space="member"] { overflow-x: clip; }
 
 /* Shared controls */
 .button,
@@ -325,6 +326,8 @@ body[data-space="member"]::after { opacity: .28; }
 
 /* Tablet is a deliberate two-zone composition. */
 @media (min-width: 761px) and (max-width: 1024px) {
+  .nucleus-icon::after { display: none; }
+  .connection-surface::before { transform: none; }
   .member-page { padding-inline: 28px; }
   .view-page h1 { font-size: 40px; }
   .messages-layout { grid-template-columns: 270px 1fr; }

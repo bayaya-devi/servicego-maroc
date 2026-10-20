@@ -50,6 +50,7 @@ let userLocationMarker = null;
 let marketingMap = null;
 let modalReturnAction = null;
 let longPressCleanup = null;
+let storyProgressFrame = null;
 const cities = {
   Casablanca: [33.5731, -7.5898],
   Rabat: [34.0209, -6.8416],
@@ -669,24 +670,43 @@ function closeModal() {
   state.modal = null;
 }
 function initializeStory() {
-  if (marketingMap) marketingMap.remove();
-  const mapElement = document.querySelector("#marketing-map");
-  if (mapElement) {
-    const [lat, lng, zoom] = [32.45, -6.45, 5];
-    marketingMap = Leaflet.map(mapElement, { center: [lat, lng], zoom, zoomControl: false, attributionControl: false, dragging: false, scrollWheelZoom: false, doubleClickZoom: false, keyboard: false, touchZoom: false });
-    Leaflet.tileLayer(state.config.mapTileUrl, { attribution: state.config.mapAttribution, maxZoom: 18 }).addTo(marketingMap);
-    const previewMarkers = [
-      { position: cities.Rabat, label: "Fuite", category: "W", kind: "need", urgent: true },
-      { position: cities.Casablanca, label: "Peinture", category: "P", kind: "help" },
-      { position: cities.Fes, label: "Livraison", category: "L", kind: "need" },
-      { position: cities.Marrakech, label: "Ménage", category: "M", kind: "help" },
-    ];
-    for (const marker of previewMarkers) {
-      const markerIcon = Leaflet.divIcon({ className: "marketing-marker", html: `<span class="premium-map-pin with-label ${marker.kind} ${marker.urgent ? "urgent" : ""}"><span class="pin-category">${marker.category}</span><span class="pin-copy"><b>${translate(state.locale, marker.label)}</b><small>${translate(state.locale, marker.kind === "need" ? "Demande" : "Service disponible")}</small></span></span>`, iconSize: [132, 50], iconAnchor: [24, 42] });
-      Leaflet.marker(marker.position, { icon: markerIcon, interactive: false }).addTo(marketingMap);
+  try {
+    if (marketingMap) marketingMap.remove();
+    const mapElement = document.querySelector("#marketing-map");
+    if (mapElement) {
+      const [lat, lng, zoom] = [32.45, -6.45, 5];
+      marketingMap = Leaflet.map(mapElement, { center: [lat, lng], zoom, zoomControl: false, attributionControl: false, dragging: false, scrollWheelZoom: false, doubleClickZoom: false, keyboard: false, touchZoom: false });
+      Leaflet.tileLayer(state.config.mapTileUrl, { attribution: state.config.mapAttribution, maxZoom: 18 }).addTo(marketingMap);
+      const previewMarkers = [
+        { position: cities.Rabat, label: "Fuite", category: "W", kind: "need", urgent: true },
+        { position: cities.Casablanca, label: "Peinture", category: "P", kind: "help" },
+        { position: cities.Fes, label: "Livraison", category: "L", kind: "need" },
+        { position: cities.Marrakech, label: "Ménage", category: "M", kind: "help" },
+      ];
+      for (const marker of previewMarkers) {
+        const markerIcon = Leaflet.divIcon({ className: "marketing-marker", html: `<span class="premium-map-pin with-label ${marker.kind} ${marker.urgent ? "urgent" : ""}"><span class="pin-category">${marker.category}</span><span class="pin-copy"><b>${translate(state.locale, marker.label)}</b><small>${translate(state.locale, marker.kind === "need" ? "Demande" : "Service disponible")}</small></span></span>`, iconSize: [132, 50], iconAnchor: [24, 42] });
+        Leaflet.marker(marker.position, { icon: markerIcon, interactive: false }).addTo(marketingMap);
+      }
     }
+    scheduleStoryProgress();
+  } catch {
+    activateStoryFallback();
   }
-  updateStoryProgress();
+}
+function activateStoryFallback() {
+  const story = document.querySelector(".story-v21");
+  if (story) story.classList.add("story-static");
+}
+function scheduleStoryProgress() {
+  if (storyProgressFrame) cancelAnimationFrame(storyProgressFrame);
+  storyProgressFrame = requestAnimationFrame(() => {
+    storyProgressFrame = null;
+    try {
+      updateStoryProgress();
+    } catch {
+      activateStoryFallback();
+    }
+  });
 }
 function updateStoryProgress() {
   const story = document.querySelector(".story-v21");
@@ -740,7 +760,9 @@ function updateStoryProgress() {
   document.querySelector(".moment-three")?.classList.toggle("is-interactive", conclusion > 0.45);
   document.querySelector(".back-to-top")?.classList.toggle("visible", progress > 0.72);
 }
-window.addEventListener("scroll", updateStoryProgress, { passive: true });
+window.addEventListener("scroll", scheduleStoryProgress, { passive: true });
+window.addEventListener("resize", scheduleStoryProgress, { passive: true });
+window.addEventListener("pageshow", scheduleStoryProgress);
 async function loadMap() {
   const [mapData, categories] = await Promise.all([
     api("/api/map"),
