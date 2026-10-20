@@ -36,12 +36,14 @@ const state = {
   geo: { country: "", region: "", city: "", source: "fallback" },
   publicPhotos: [],
   passwordVisible: false,
+  resetToken: null,
   mobileConversationOpen: false,
   locating: false,
   selectedMapPoint: null,
   messageAttachment: null,
   voiceRecorder: null,
   voiceChunks: [],
+  editListing: null,
   activity: { replied: [], reviews: [] },
 };
 let leafletMap = null;
@@ -467,8 +469,8 @@ function selectedItem() {
       : "";
   const actions = own
     ? request
-      ? `<button class="button secondary" data-action="open-offers" data-id="${item.id}">Voir les réponses</button>`
-      : `<button class="button outline" disabled>Votre service</button>`
+      ? `<button class="button secondary" data-action="open-offers" data-id="${item.id}">Voir les réponses</button><button class="button outline" data-action="open-edit-listing">Modifier</button><button class="text-button danger-action" data-action="withdraw-listing">Retirer</button>`
+      : `<button class="button outline" data-action="open-edit-listing">Modifier mon service</button><button class="text-button danger-action" data-action="withdraw-listing">Masquer</button>`
     : request
       ? `<button class="button" data-action="open-reply" data-id="${item.id}">Proposer mon aide</button>`
       : `<button class="button green" data-action="open-direct" data-id="${item.id}">Demander ce service</button>`;
@@ -555,8 +557,10 @@ function adminView() {
 function authModal() {
   const register = state.authMode === "register";
   const forgot = state.authMode === "forgot";
+  const reset = state.authMode === "reset";
   const country = state.geo.country || "MA";
   const codes = [["MA","+212"],["FR","+33"],["ES","+34"],["GB","+44"],["US","+1"],["DE","+49"],["AE","+971"],["IN","+91"]];
+  if (reset) return `<div class="modal-layer"><section class="modal public-modal auth-modal"><button class="button icon outline close" data-action="close-modal" aria-label="Fermer">×</button><p class="eyebrow">ServiceGO</p><h2>Choisissez un nouveau mot de passe</h2><p class="modal-intro">Ce lien est valable pendant une heure.</p><form class="form-grid" data-form="reset-password"><label class="field full password-field"><span>Nouveau mot de passe</span><span class="password-input"><input name="password" type="${state.passwordVisible ? "text" : "password"}" autocomplete="new-password" minlength="8" placeholder="8 caractères minimum" required /><button type="button" data-action="toggle-password" aria-label="${state.passwordVisible ? "Masquer le mot de passe" : "Afficher le mot de passe"}">${state.passwordVisible ? "◉" : "○"}</button></span></label><button class="button submit" type="submit">Réinitialiser mon mot de passe</button></form></section></div>`;
   if (forgot) return `<div class="modal-layer"><section class="modal public-modal auth-modal"><button class="button icon outline close" data-action="close-modal" aria-label="Fermer">×</button><p class="eyebrow">ServiceGO</p><h2>Mot de passe oublié ?</h2><p class="modal-intro">Indiquez l'adresse utilisée pour votre compte.</p><form class="form-grid" data-form="forgot"><label class="field full"><span>E-mail</span><input name="email" type="email" autocomplete="email" placeholder="nom@exemple.com" required /></label><button class="button submit" type="submit">Envoyer le lien</button></form><button class="text-button auth-back" data-action="auth-tab" data-mode="login">Retour à la connexion</button></section></div>`;
   return `<div class="modal-layer"><section class="modal public-modal auth-modal"><button class="button icon outline close" data-action="close-modal" aria-label="Fermer">×</button><p class="eyebrow">ServiceGO</p><h2>${register ? "Créez votre compte" : "Bon retour"}</h2><div class="modal-tabs"><button class="${register ? "active" : ""}" data-action="auth-tab" data-mode="register">Créer un compte</button><button class="${!register ? "active" : ""}" data-action="auth-tab" data-mode="login">Se connecter</button></div><form class="form-grid" data-form="auth">${register ? `<label class="field"><span>Prénom</span><input name="first_name" autocomplete="given-name" minlength="1" maxlength="40" placeholder="Votre prénom" required /></label><label class="field"><span>Nom</span><input name="last_name" autocomplete="family-name" minlength="1" maxlength="40" placeholder="Votre nom" required /></label>` : ""}<label class="field full"><span>E-mail</span><input name="email" type="email" autocomplete="email" placeholder="nom@exemple.com" required /></label>${register ? `<div class="phone-field full"><label class="field dial-code"><span>Indicatif</span><select name="dial_code" aria-label="Indicatif international">${codes.map(([iso,code])=>`<option value="${code}" ${iso===country?"selected":""}>${iso} ${code}</option>`).join("")}</select></label><label class="field phone-number"><span>Téléphone</span><input name="phone_number" maxlength="24" inputmode="tel" autocomplete="tel-national" placeholder="6 12 34 56 78" required /></label></div>` : ""}<label class="field full password-field"><span>Mot de passe</span><span class="password-input"><input name="password" type="${state.passwordVisible ? "text" : "password"}" autocomplete="${register ? "new-password" : "current-password"}" minlength="8" placeholder="8 caractères minimum" required /><button type="button" data-action="toggle-password" aria-label="${state.passwordVisible ? "Masquer le mot de passe" : "Afficher le mot de passe"}">${state.passwordVisible ? "◉" : "○"}</button></span></label>${!register ? `<button type="button" class="text-button forgot-link" data-action="auth-tab" data-mode="forgot">Mot de passe oublié ?</button>` : ""}<button class="button submit" type="submit">${register ? "Créer mon compte" : "Se connecter"}</button></form><p class="form-note">Un seul compte pour demander un service et proposer votre aide.</p></section></div>`;
 }
@@ -568,6 +572,13 @@ function requestModal() {
 function serviceModal() {
   const point = currentMapPoint(state.user?.district);
   return `<div class="modal-layer"><section class="modal"><button class="button icon outline close" data-action="close-modal" aria-label="Fermer">×</button><p class="eyebrow">Proposer</p><h2>Quel service proposez-vous ?</h2><form class="form-grid" data-form="service"><input type="hidden" name="latitude" value="${point.latitude}" /><input type="hidden" name="longitude" value="${point.longitude}" /><label class="field"><span>Service</span><select name="category_id" required>${categoryOptions()}</select></label><label class="field"><span>Ville ou quartier</span><input name="district" value="${escape(state.user?.district || "")}" maxlength="80" required /></label><label class="field full"><span>Titre court</span><input name="title" maxlength="100" placeholder="Ex. : peinture d'appartements" required /></label><label class="field full"><span>Expliquez votre service</span><textarea name="description" maxlength="1200" placeholder="Décrivez votre savoir-faire et vos disponibilités." required></textarea></label><label class="field full"><span>Prix indicatif (facultatif)</span><input name="price_hint" maxlength="80" placeholder="Ex. : à partir de 200 DH" /></label><button class="button green submit" type="submit">Me rendre visible</button></form></section></div>`;
+}
+function editListingModal() {
+  const listing = state.editListing;
+  if (!listing) return "";
+  const request = listing.type === "request";
+  const item = listing.item;
+  return `<div class="modal-layer"><section class="modal"><button class="button icon outline close" data-action="close-modal" aria-label="Fermer">×</button><p class="eyebrow">${request ? "Demande" : "Service"}</p><h2>Modifier ${request ? "ma demande" : "mon service"}</h2><form class="form-grid" data-form="edit-listing"><input type="hidden" name="id" value="${escape(item.id)}" /><input type="hidden" name="type" value="${request ? "request" : "service"}" /><label class="field full"><span>Titre</span><input name="title" value="${escape(item.title)}" maxlength="100" required /></label><label class="field full"><span>Description</span><textarea name="description" maxlength="1200" required>${escape(item.description)}</textarea></label><label class="field"><span>Ville ou quartier</span><input name="district" value="${escape(item.district)}" maxlength="80" required /></label>${request ? `<label class="field"><span>Urgence</span><select name="urgency"><option value="normal" ${item.urgency !== "urgent" ? "selected" : ""}>Normale</option><option value="urgent" ${item.urgency === "urgent" ? "selected" : ""}>Urgente</option></select></label><label class="field full"><span>Budget (facultatif)</span><input name="budget_hint" value="${escape(item.budget_hint || "")}" maxlength="80" /></label>` : `<label class="field full"><span>Prix indicatif (facultatif)</span><input name="price_hint" value="${escape(item.price_hint || "")}" maxlength="80" /></label>`}<button class="button submit" type="submit">Enregistrer les modifications</button></form></section></div>`;
 }
 function replyModal() {
   const item = state.selected?.item;
@@ -584,7 +595,10 @@ function profileModal() {
   return `<div class="modal-layer"><section class="modal profile-editor"><button class="button icon outline close" data-action="close-modal" aria-label="Fermer">×</button><p class="eyebrow">Profil</p><h2>Personnaliser mon espace</h2><form class="form-grid" data-form="profile"><section class="profile-privacy full"><h3>Profil public</h3><p>La photo, le prénom, la biographie et les évaluations peuvent être visibles aux autres membres. L'e-mail et le téléphone restent privés.</p></section><label class="field"><span>Prénom</span><input name="first_name" value="${escape(user.first_name || user.full_name?.split(" ")[0] || "")}" maxlength="40" required /></label><label class="field"><span>Nom</span><input name="last_name" value="${escape(user.last_name || user.full_name?.split(" ").slice(1).join(" ") || "")}" maxlength="40" required /></label><label class="field"><span>Photo de profil</span><input type="file" name="avatar" accept="image/jpeg,image/png,image/webp" /></label><label class="field"><span>Image de couverture</span><input type="file" name="cover" accept="image/jpeg,image/png,image/webp" /></label><label class="field"><span>Téléphone privé</span><input name="phone" value="${escape(user.phone || "")}" maxlength="30" /></label><label class="field"><span>Ville publique approximative</span><input name="district" value="${escape(user.district || "")}" maxlength="80" /></label><label class="field full"><span>Quelques mots sur vous</span><textarea name="bio" maxlength="500">${escape(user.bio || "")}</textarea></label><fieldset class="dashboard-preferences full"><legend>Sections du tableau de bord</legend><label><input type="checkbox" name="show_activity" ${prefs.activity ? "checked" : ""} /> Mon activité</label><label><input type="checkbox" name="show_exchanges" ${prefs.exchanges ? "checked" : ""} /> Mes échanges</label><label><input type="checkbox" name="show_tracking" ${prefs.tracking ? "checked" : ""} /> Mon suivi</label></fieldset><section class="profile-privacy full"><h3>Informations privées</h3></section><label class="field full"><span>Nouvelle adresse e-mail</span><input name="new_email" type="email" autocomplete="email" placeholder="${translate(state.locale, "Laissez ce champ vide pour conserver")} ${escape(user.email)}" /></label><label class="field"><span>Mot de passe actuel</span><input name="current_password" type="password" autocomplete="current-password" /></label><label class="field"><span>Nouveau mot de passe</span><input name="new_password" type="password" minlength="8" autocomplete="new-password" /></label><button class="button submit" type="submit">Enregistrer</button></form></section></div>`;
 }
 function settingsModal() {
-  return `<div class="modal-layer"><section class="modal public-modal settings-modal"><button class="button icon outline close" data-action="close-modal" aria-label="Fermer">×</button><p class="eyebrow">ServiceGO</p><h2>Paramètres</h2><section class="settings-section"><h3>Langue</h3><div class="settings-languages" role="group" aria-label="Langue"><button class="${state.locale === "fr" ? "active" : ""}" data-action="set-locale" data-locale="fr">Français</button><button class="${state.locale === "en" ? "active" : ""}" data-action="set-locale" data-locale="en">English</button><button class="${state.locale === "ar" ? "active" : ""}" data-action="set-locale" data-locale="ar">العربية</button></div></section><section class="settings-section"><h3>Compte</h3><button class="button secondary" data-action="open-profile">Modifier mes informations</button></section></section></div>`;
+  return `<div class="modal-layer"><section class="modal public-modal settings-modal"><button class="button icon outline close" data-action="close-modal" aria-label="Fermer">×</button><p class="eyebrow">ServiceGO</p><h2>Paramètres</h2><section class="settings-section"><h3>Langue</h3><div class="settings-languages" role="group" aria-label="Langue"><button class="${state.locale === "fr" ? "active" : ""}" data-action="set-locale" data-locale="fr">Français</button><button class="${state.locale === "en" ? "active" : ""}" data-action="set-locale" data-locale="en">English</button><button class="${state.locale === "ar" ? "active" : ""}" data-action="set-locale" data-locale="ar">العربية</button></div></section><section class="settings-section"><h3>Compte</h3><button class="button secondary" data-action="open-profile">Modifier mes informations</button><button class="text-button danger-action" data-action="open-delete-account">Supprimer mon compte</button></section></section></div>`;
+}
+function deleteAccountModal() {
+  return `<div class="modal-layer"><section class="modal public-modal"><button class="button icon outline close" data-action="close-modal" aria-label="Fermer">×</button><p class="eyebrow">Compte</p><h2>Supprimer mon compte</h2><p class="modal-intro">Cette action désactive le compte, supprime vos informations personnelles et vous déconnecte.</p><form class="form-grid" data-form="delete-account"><label class="field full"><span>Mot de passe actuel</span><input name="current_password" type="password" autocomplete="current-password" required /></label><button class="button submit danger-action" type="submit">Supprimer définitivement mon compte</button></form></section></div>`;
 }
 function reviewModal() {
   return `<div class="modal-layer"><section class="modal review-modal"><button class="button icon outline close" data-action="close-modal" aria-label="Fermer">×</button><p class="eyebrow">Évaluation mutuelle</p><h2>Comment s'est passé le service ?</h2><p class="modal-intro">Votre avis sera publié lorsque l'autre personne aura évalué, ou dans sept jours.</p><form class="form-grid" data-form="review"><input type="hidden" name="request_id" value="${escape(state.reviewRequestId)}" /><fieldset class="rating-field full"><legend>Note de 1 à 5 étoiles</legend>${[1,2,3,4,5].map((value)=>`<label><input type="radio" name="rating" value="${value}" required /><span>${icon("star")}</span><b>${value}</b></label>`).join("")}</fieldset><label class="field full"><span>Commentaire facultatif</span><textarea name="comment" maxlength="500" placeholder="Décrivez votre expérience sans partager d'informations personnelles."></textarea></label><button class="button submit" type="submit">Enregistrer mon évaluation</button></form></section></div>`;
@@ -653,10 +667,12 @@ function modal() {
   if (state.modal === "auth") return authModal();
   if (state.modal === "request") return requestModal();
   if (state.modal === "service") return serviceModal();
+  if (state.modal === "edit-listing") return editListingModal();
   if (state.modal === "reply") return replyModal();
   if (state.modal === "direct") return directModal();
   if (state.modal === "profile") return profileModal();
   if (state.modal === "settings") return settingsModal();
+  if (state.modal === "delete-account") return deleteAccountModal();
   if (state.modal === "review") return reviewModal();
   if (state.modal === "offers") return offersModal();
   if (state.modal === "quick") return quickModal();
@@ -881,6 +897,13 @@ async function start() {
       window.history.replaceState({}, "", window.location.pathname);
       notify("Adresse e-mail confirmée.");
     }
+    const resetToken = new URLSearchParams(window.location.search).get("reset_token");
+    if (resetToken) {
+      state.resetToken = resetToken;
+      state.authMode = "reset";
+      state.modal = "auth";
+      window.history.replaceState({}, "", window.location.pathname);
+    }
   } catch {
     notify("Impossible de joindre ServiceGO.", true);
   }
@@ -1017,6 +1040,20 @@ app.addEventListener("click", async (event) => {
       state.modal = "service";
       render();
     }
+    if (action === "open-edit-listing" && state.selected?.item) {
+      state.editListing = { type: state.selected.type, item: state.selected.item };
+      state.modal = "edit-listing";
+      render();
+    }
+    if (action === "withdraw-listing" && state.selected?.item) {
+      const { type, item } = state.selected;
+      const endpoint = type === "request" ? `/api/requests/${item.id}` : `/api/services/${item.id}`;
+      const data = await api(endpoint, { method: "DELETE" });
+      state.selected = null;
+      await Promise.all([loadMap(), loadMine()]);
+      render();
+      notify(data.message);
+    }
     if (action === "open-reply") {
       state.modal = "reply";
       render();
@@ -1043,6 +1080,10 @@ app.addEventListener("click", async (event) => {
     if (action === "open-settings") {
       modalReturnAction = action;
       state.modal = "settings";
+      render();
+    }
+    if (action === "open-delete-account") {
+      state.modal = "delete-account";
       render();
     }
     if (action === "resend-verification") {
@@ -1285,6 +1326,14 @@ app.addEventListener("submit", async (event) => {
       state.authMode = "login";
       render();
     }
+    if (type === "reset-password") {
+      const data = await api("/api/auth/reset-password", { method: "POST", body: JSON.stringify({ token: state.resetToken, password: values.password }) });
+      state.user = data.user;
+      state.resetToken = null;
+      state.modal = null;
+      await navigateToView("map", { replace: true });
+      notify(data.message);
+    }
     if (type === "request") {
       const approximate = values.approximate === "on";
       const coordinates = {
@@ -1321,6 +1370,15 @@ app.addEventListener("submit", async (event) => {
       await loadMap();
       render();
       notify("Votre service est maintenant visible.");
+    }
+    if (type === "edit-listing") {
+      const endpoint = values.type === "request" ? `/api/requests/${values.id}` : `/api/services/${values.id}`;
+      const data = await api(endpoint, { method: "PATCH", body: JSON.stringify(values) });
+      state.modal = null;
+      state.editListing = null;
+      await Promise.all([loadMap(), loadMine()]);
+      render();
+      notify(data.message);
     }
     if (type === "reply") {
       const data = await api(`/api/requests/${values.request_id}/offers`, {
@@ -1376,6 +1434,16 @@ app.addEventListener("submit", async (event) => {
       state.modal = null;
       render();
       notify("Profil enregistré.");
+    }
+    if (type === "delete-account") {
+      const data = await api("/api/me", { method: "DELETE", body: JSON.stringify(values) });
+      state.user = null;
+      state.view = "home";
+      state.modal = null;
+      state.selected = null;
+      window.history.replaceState({}, "", "/");
+      render();
+      notify(data.message);
     }
     if (type === "message") {
       const draft = state.messageAttachment;

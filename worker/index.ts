@@ -221,6 +221,51 @@ async function sendVerificationEmail(env: Env, email: string, fullName: string, 
   );
 }
 
+function clientAddress(request: Request): string {
+  return text(request.headers.get("CF-Connecting-IP"), 64) || "unknown";
+}
+
+async function consumeRateLimit(env: Env, scope: string, subjectKey: string, limit: number, windowSeconds: number): Promise<boolean> {
+  const windowStart = Math.floor(Date.now() / (windowSeconds * 1000));
+  const result = await env.DB.prepare(
+    `INSERT INTO rate_limit_windows (scope, subject_key, window_start, count) VALUES (?, ?, ?, 1)
+     ON CONFLICT(scope, subject_key, window_start) DO UPDATE SET count = count + 1 WHERE count < ?`,
+  ).bind(scope, subjectKey, windowStart, limit).run();
+  return (result.meta.changes ?? 0) === 1;
+}
+
+async function createNotification(env: Env, userId: string, type: "offer" | "message" | "service_update" | "report_update", title: string, body: string, link?: string): Promise<void> {
+  await env.DB.prepare("INSERT INTO notifications (id, user_id, type, title, body, link) VALUES (?, ?, ?, ?, ?, ?)")
+    .bind(crypto.randomUUID(), userId, type, text(title, 120), text(body, 500), text(link, 300) || null)
+    .run();
+}
+
+async function createPasswordReset(env: Env, userId: string): Promise<string> {
+  const token = randomToken();
+  await env.DB.batch([
+    env.DB.prepare("UPDATE password_resets SET used_at = CURRENT_TIMESTAMP WHERE user_id = ? AND used_at IS NULL").bind(userId),
+    env.DB.prepare("INSERT INTO password_resets (id, user_id, token_hash, expires_at) VALUES (?, ?, ?, datetime('now', '+1 hour'))")
+      .bind(crypto.randomUUID(), userId, await tokenHash(token)),
+  ]);
+  return token;
+}
+
+async function ownsUpload(env: Env, key: string, userId: string, allowedPurposes: string[]): Promise<boolean> {
+  if (!validUploadKey(key, userId) || !env.UPLOADS) return false;
+  const object = await env.UPLOADS.getWithMetadata<UploadMetadata>(key, "stream");
+  return Boolean(object.value && object.metadata?.userId === userId && allowedPurposes.includes(object.metadata.purpose));
+}
+
+async function sendPasswordResetEmail(env: Env, email: string, fullName: string, token: string, origin: string): Promise<void> {
+  const link = `${origin}/?reset_token=${encodeURIComponent(token)}`;
+  await sendEmail(
+    env,
+    email,
+    "Réinitialisez votre mot de passe ServiceGO",
+    `<p>Bonjour ${escapeHtml(fullName)},</p><p>Pour choisir un nouveau mot de passe, ouvrez ce lien :</p><p><a href="${escapeHtml(link)}">Réinitialiser mon mot de passe</a></p><p>Ce lien expire dans une heure.</p>`,
+  );
+}
+
 async function verifyTurnstile(token: string, request: Request, env: Env): Promise<boolean> {
   const secret = (env as Env & { TURNSTILE_SECRET_KEY?: string }).TURNSTILE_SECRET_KEY;
   if (!secret) return true;
@@ -306,11 +351,44 @@ async function handleAuth(request: Request, env: Env, ctx: ExecutionContext, pat
     const body = await readBody(request);
     const email = text(body?.email, 254).toLowerCase();
     if (!validEmail(email)) return badRequest("Indiquez une adresse e-mail valide.");
+    if (!(await consumeRateLimit(env, "password_reset", clientAddress(request), 5, 3600))) {
+      return json({ error: "Trop de demandes. Réessayez dans une heure." }, 429);
+    }
     const mailEnv = env as Env & { RESEND_API_KEY?: string; RESEND_FROM_EMAIL?: string };
     if (!mailEnv.RESEND_API_KEY || !mailEnv.RESEND_FROM_EMAIL) {
       return json({ error: "La récupération par e-mail est temporairement indisponible : le service d'envoi n'est pas configuré." }, 503);
     }
-    return json({ error: "La récupération sécurisée du mot de passe n'est pas encore activée. Contactez aetbconseil@gmail.com." }, 503);
+    const account = await env.DB.prepare("SELECT id, email, full_name FROM profiles WHERE email = ? AND is_active = 1")
+      .bind(email).first<{ id: string; email: string; full_name: string }>();
+    if (account) {
+      const token = await createPasswordReset(env, account.id);
+      ctx.waitUntil(sendPasswordResetEmail(env, account.email, account.full_name, token, new URL(request.url).origin));
+    }
+    return json({ message: "Si cette adresse correspond à un compte, un lien de réinitialisation vient d'être envoyé." }, 202);
+  }
+
+  if (pathname === "/api/auth/reset-password" && request.method === "POST") {
+    const body = await readBody(request);
+    const token = text(body?.token, 500);
+    const password = text(body?.password, 200);
+    if (!token || password.length < 8) return badRequest("Utilisez un lien valide et un mot de passe d'au moins 8 caractères.");
+    if (!(await consumeRateLimit(env, "password_reset_confirm", clientAddress(request), 10, 3600))) {
+      return json({ error: "Trop de tentatives. Réessayez dans une heure." }, 429);
+    }
+    const reset = await env.DB.prepare(
+      `SELECT pr.id, pr.user_id FROM password_resets pr JOIN profiles p ON p.id = pr.user_id
+       WHERE pr.token_hash = ? AND pr.used_at IS NULL AND pr.expires_at > datetime('now') AND p.is_active = 1`,
+    ).bind(await tokenHash(token)).first<{ id: string; user_id: string }>();
+    if (!reset) return badRequest("Ce lien est invalide ou a expiré.");
+    const sessionId = crypto.randomUUID();
+    await env.DB.batch([
+      env.DB.prepare("UPDATE profiles SET password_hash = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?").bind(await passwordHash(password), reset.user_id),
+      env.DB.prepare("UPDATE password_resets SET used_at = CURRENT_TIMESTAMP WHERE id = ?").bind(reset.id),
+      env.DB.prepare("DELETE FROM sessions WHERE user_id = ?").bind(reset.user_id),
+      env.DB.prepare("INSERT INTO sessions (id, user_id, expires_at) VALUES (?, ?, datetime('now', '+30 days'))").bind(sessionId, reset.user_id),
+    ]);
+    const user = await currentUser(new Request(request.url, { headers: { cookie: `sg_session=${sessionId}` } }), env);
+    return json({ user, message: "Votre mot de passe a été réinitialisé." }, 200, { "set-cookie": sessionCookie(sessionId, request) });
   }
 
   if (pathname !== "/api/auth/register" && pathname !== "/api/auth/login") return null;
@@ -320,6 +398,10 @@ async function handleAuth(request: Request, env: Env, ctx: ExecutionContext, pat
   const email = text(body.email, 254).toLowerCase();
   const password = text(body.password, 200);
   if (!validEmail(email) || password.length < 8) return badRequest("Utilisez une adresse e-mail valide et un mot de passe d'au moins 8 caractères.");
+
+  if (!(await consumeRateLimit(env, pathname === "/api/auth/register" ? "register" : "login", clientAddress(request), pathname === "/api/auth/register" ? 5 : 12, 900))) {
+    return json({ error: "Trop de tentatives. Réessayez dans quelques minutes." }, 429);
+  }
 
   if (pathname === "/api/auth/register") {
     const firstName = text(body.first_name, 40);
@@ -470,6 +552,25 @@ async function handleApi(request: Request, env: Env, ctx: ExecutionContext): Pro
     return json({ message: "Un lien de confirmation a été envoyé à la nouvelle adresse." }, 202);
   }
 
+  if (pathname === "/api/me" && request.method === "DELETE") {
+    const user = await requireUser(request, env);
+    if (isResponse(user)) return user;
+    const body = await readBody(request);
+    const currentPassword = text(body?.current_password, 200);
+    const account = await env.DB.prepare("SELECT password_hash FROM profiles WHERE id = ?").bind(user.id).first<{ password_hash: string }>();
+    if (!account || !(await passwordMatches(currentPassword, account.password_hash))) return json({ error: "Mot de passe actuel incorrect." }, 401);
+    const anonymizedEmail = `deleted-${user.id}@servicego.invalid`;
+    await env.DB.batch([
+      env.DB.prepare(`UPDATE profiles SET email = ?, password_hash = ?, full_name = 'Compte supprimé', first_name = NULL, last_name = NULL,
+        phone = NULL, district = 'Non renseignée', avatar_url = NULL, cover_url = NULL, bio = NULL, is_active = 0,
+        deleted_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP WHERE id = ?`).bind(anonymizedEmail, await passwordHash(randomToken()), user.id),
+      env.DB.prepare("DELETE FROM sessions WHERE user_id = ?").bind(user.id),
+      env.DB.prepare("UPDATE email_verifications SET used_at = CURRENT_TIMESTAMP WHERE user_id = ? AND used_at IS NULL").bind(user.id),
+      env.DB.prepare("UPDATE password_resets SET used_at = CURRENT_TIMESTAMP WHERE user_id = ? AND used_at IS NULL").bind(user.id),
+    ]);
+    return json({ message: "Votre compte a été désactivé et vos informations personnelles ont été retirées." }, 200, { "set-cookie": clearSessionCookie(request) });
+  }
+
   if (pathname === "/api/auth/resend-verification" && request.method === "POST") {
     const user = await requireUser(request, env);
     if (isResponse(user)) return user;
@@ -481,6 +582,55 @@ async function handleApi(request: Request, env: Env, ctx: ExecutionContext): Pro
     return json({ message: "Un nouveau lien de confirmation a été envoyé." }, 202);
   }
 
+  if (pathname === "/api/notifications" && request.method === "GET") {
+    const user = await requireUser(request, env);
+    if (isResponse(user)) return user;
+    const { results } = await env.DB.prepare("SELECT id, type, title, body, link, read_at, created_at FROM notifications WHERE user_id = ? ORDER BY created_at DESC LIMIT 50")
+      .bind(user.id).all();
+    return json({ notifications: results });
+  }
+
+  if (pathname === "/api/notifications/read" && request.method === "POST") {
+    const user = await requireUser(request, env);
+    if (isResponse(user)) return user;
+    const body = await readBody(request);
+    const ids = Array.isArray(body?.ids) ? body.ids.filter((id): id is string => typeof id === "string" && /^[0-9a-f-]{36}$/.test(id)).slice(0, 50) : [];
+    if (!ids.length) return badRequest("Aucune notification valide.");
+    const placeholders = ids.map(() => "?").join(",");
+    await env.DB.prepare(`UPDATE notifications SET read_at = CURRENT_TIMESTAMP WHERE user_id = ? AND id IN (${placeholders})`).bind(user.id, ...ids).run();
+    return json({ ok: true });
+  }
+
+  if (pathname === "/api/reports" && request.method === "POST") {
+    const user = await requireUser(request, env);
+    if (isResponse(user)) return user;
+    const verificationError = requireVerifiedUser(user);
+    if (verificationError) return verificationError;
+    if (!(await consumeRateLimit(env, "report", user.id, 10, 86400))) return json({ error: "Trop de signalements. Réessayez demain." }, 429);
+    const body = await readBody(request);
+    const subjectType = text(body?.subject_type, 20);
+    const subjectId = text(body?.subject_id, 80);
+    const reason = text(body?.reason, 160);
+    const details = text(body?.details, 1200);
+    if (!new Set(["request", "service", "user", "message"]).has(subjectType) || !subjectId || reason.length < 3) return badRequest("Signalement invalide.");
+    let ownerId = "";
+    if (subjectType === "request") ownerId = (await env.DB.prepare("SELECT requester_id AS id FROM service_requests WHERE id = ?").bind(subjectId).first<{ id: string }>())?.id || "";
+    if (subjectType === "service") ownerId = (await env.DB.prepare("SELECT user_id AS id FROM user_services WHERE id = ?").bind(subjectId).first<{ id: string }>())?.id || "";
+    if (subjectType === "user") ownerId = (await env.DB.prepare("SELECT id FROM profiles WHERE id = ? AND is_active = 1").bind(subjectId).first<{ id: string }>())?.id || "";
+    if (subjectType === "message") ownerId = (await env.DB.prepare(
+      "SELECT m.sender_id AS id FROM messages m JOIN conversations c ON c.id = m.conversation_id WHERE m.id = ? AND (c.user_a_id = ? OR c.user_b_id = ?)",
+    ).bind(subjectId, user.id, user.id).first<{ id: string }>())?.id || "";
+    if (!ownerId) return notFound();
+    if (ownerId === user.id) return badRequest("Vous ne pouvez pas signaler votre propre contenu.");
+    try {
+      await env.DB.prepare("INSERT INTO reports (id, reporter_id, subject_type, subject_id, reason, details) VALUES (?, ?, ?, ?, ?, ?)")
+        .bind(crypto.randomUUID(), user.id, subjectType, subjectId, reason, details || null).run();
+    } catch {
+      return json({ error: "Vous avez déjà signalé cet élément." }, 409);
+    }
+    return json({ message: "Votre signalement a été enregistré." }, 201);
+  }
+
   if (pathname === "/api/admin/overview" && request.method === "GET") {
     const user = await requireUser(request, env);
     if (isResponse(user)) return user;
@@ -490,9 +640,35 @@ async function handleApi(request: Request, env: Env, ctx: ExecutionContext): Pro
         (SELECT COUNT(*) FROM profiles WHERE is_active = 1) AS users,
         (SELECT COUNT(*) FROM service_requests WHERE status = 'open') AS open_requests,
         (SELECT COUNT(*) FROM user_services WHERE available = 1) AS active_services,
-        (SELECT COUNT(*) FROM conversations) AS conversations`,
-    ).first<{ users: number; open_requests: number; active_services: number; conversations: number }>();
+        (SELECT COUNT(*) FROM conversations) AS conversations,
+        (SELECT COUNT(*) FROM reports WHERE status = 'open') AS open_reports`,
+    ).first<{ users: number; open_requests: number; active_services: number; conversations: number; open_reports: number }>();
     return json({ stats });
+  }
+
+  if (pathname === "/api/admin/reports" && request.method === "GET") {
+    const user = await requireUser(request, env);
+    if (isResponse(user)) return user;
+    if (!user.is_admin) return json({ error: "Accès administrateur requis." }, 403);
+    const { results } = await env.DB.prepare(
+      `SELECT rp.id, rp.subject_type, rp.subject_id, rp.reason, rp.details, rp.status, rp.created_at,
+       reporter.full_name AS reporter_name FROM reports rp JOIN profiles reporter ON reporter.id = rp.reporter_id
+       ORDER BY CASE rp.status WHEN 'open' THEN 0 WHEN 'reviewing' THEN 1 ELSE 2 END, rp.created_at DESC LIMIT 100`,
+    ).all();
+    return json({ reports: results });
+  }
+
+  const adminReportMatch = pathname.match(/^\/api\/admin\/reports\/([^/]+)$/);
+  if (adminReportMatch && request.method === "PATCH") {
+    const user = await requireUser(request, env);
+    if (isResponse(user)) return user;
+    if (!user.is_admin) return json({ error: "Accès administrateur requis." }, 403);
+    const body = await readBody(request);
+    const status = text(body?.status, 20);
+    if (!new Set(["open", "reviewing", "closed"]).has(status)) return badRequest("Statut de signalement invalide.");
+    const result = await env.DB.prepare("UPDATE reports SET status = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?").bind(status, adminReportMatch[1]).run();
+    if (!(result.meta.changes ?? 0)) return notFound();
+    return json({ ok: true });
   }
 
   if (pathname === "/api/requests" && request.method === "GET") {
@@ -521,9 +697,11 @@ async function handleApi(request: Request, env: Env, ctx: ExecutionContext): Pro
     const latitude = Number(body.latitude);
     const longitude = Number(body.longitude);
     const urgency = body.urgency === "urgent" ? "urgent" : "normal";
+    const photoKey = text(body.photo_key, 500);
     if (!categoryId || title.length < 3 || description.length < 5 || !validCoordinates(latitude, longitude)) {
       return badRequest("Complétez la demande et choisissez une position valide sur la carte.");
     }
+    if (photoKey && !(await ownsUpload(env, photoKey, user.id, ["request"]))) return badRequest("Photo de demande invalide.");
     const category = await env.DB.prepare("SELECT id FROM categories WHERE id = ?").bind(categoryId).first<{ id: string }>();
     if (!category) return badRequest("Catégorie inconnue.");
     const id = crypto.randomUUID();
@@ -531,9 +709,34 @@ async function handleApi(request: Request, env: Env, ctx: ExecutionContext): Pro
       `INSERT INTO service_requests (id, requester_id, category_id, title, description, district, latitude, longitude, urgency, budget_hint, photo_key)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     )
-      .bind(id, user.id, categoryId, title, description, district, latitude, longitude, urgency, text(body.budget_hint, 80) || null, text(body.photo_key, 500) || null)
+      .bind(id, user.id, categoryId, title, description, district, latitude, longitude, urgency, text(body.budget_hint, 80) || null, photoKey || null)
       .run();
     return json({ id, message: "Votre demande est visible sur la carte." }, 201);
+  }
+
+  const requestMatch = pathname.match(/^\/api\/requests\/([^/]+)$/);
+  if (requestMatch && (request.method === "PATCH" || request.method === "DELETE")) {
+    const user = await requireUser(request, env);
+    if (isResponse(user)) return user;
+    const item = await env.DB.prepare("SELECT id, status FROM service_requests WHERE id = ? AND requester_id = ?")
+      .bind(requestMatch[1], user.id).first<{ id: string; status: string }>();
+    if (!item) return notFound();
+    if (request.method === "DELETE") {
+      if (item.status !== "open") return badRequest("Seule une demande ouverte peut être retirée.");
+      await env.DB.prepare("UPDATE service_requests SET status = 'cancelled', updated_at = CURRENT_TIMESTAMP WHERE id = ?").bind(item.id).run();
+      return json({ message: "Votre demande a été retirée de la carte." });
+    }
+    if (item.status !== "open") return badRequest("Seule une demande ouverte peut être modifiée.");
+    const body = await readBody(request);
+    if (!body) return badRequest("Informations invalides.");
+    const title = text(body.title, 100);
+    const description = text(body.description, 1200);
+    const district = text(body.district, 80);
+    const urgency = body.urgency === "urgent" ? "urgent" : "normal";
+    if (title.length < 3 || description.length < 5 || !district) return badRequest("Complétez les informations de la demande.");
+    await env.DB.prepare("UPDATE service_requests SET title = ?, description = ?, district = ?, urgency = ?, budget_hint = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?")
+      .bind(title, description, district, urgency, text(body.budget_hint, 80) || null, item.id).run();
+    return json({ message: "Votre demande a été mise à jour." });
   }
 
   if (pathname === "/api/services" && request.method === "GET") {
@@ -576,6 +779,28 @@ async function handleApi(request: Request, env: Env, ctx: ExecutionContext): Pro
     return json({ id, message: "Votre service est visible sur la carte." }, 201);
   }
 
+  const serviceMatch = pathname.match(/^\/api\/services\/([^/]+)$/);
+  if (serviceMatch && (request.method === "PATCH" || request.method === "DELETE")) {
+    const user = await requireUser(request, env);
+    if (isResponse(user)) return user;
+    const item = await env.DB.prepare("SELECT id, available FROM user_services WHERE id = ? AND user_id = ?")
+      .bind(serviceMatch[1], user.id).first<{ id: string; available: number }>();
+    if (!item) return notFound();
+    if (request.method === "DELETE") {
+      await env.DB.prepare("UPDATE user_services SET available = 0, updated_at = CURRENT_TIMESTAMP WHERE id = ?").bind(item.id).run();
+      return json({ message: "Votre service n'est plus visible sur la carte." });
+    }
+    const body = await readBody(request);
+    if (!body) return badRequest("Informations invalides.");
+    const title = text(body.title, 100);
+    const description = text(body.description, 1200);
+    const district = text(body.district, 80);
+    if (title.length < 3 || description.length < 5 || !district) return badRequest("Complétez les informations du service.");
+    await env.DB.prepare("UPDATE user_services SET title = ?, description = ?, district = ?, price_hint = ?, available = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?")
+      .bind(title, description, district, text(body.price_hint, 80) || null, body.available === false ? 0 : 1, item.id).run();
+    return json({ message: "Votre service a été mis à jour." });
+  }
+
   const offerMatch = pathname.match(/^\/api\/requests\/([^/]+)\/offers$/);
   if (offerMatch && request.method === "GET") {
     const user = await requireUser(request, env);
@@ -598,6 +823,7 @@ async function handleApi(request: Request, env: Env, ctx: ExecutionContext): Pro
     if (isResponse(user)) return user;
     const verificationError = requireVerifiedUser(user);
     if (verificationError) return verificationError;
+    if (!(await consumeRateLimit(env, "offer", user.id, 20, 3600))) return json({ error: "Trop de tentatives. Réessayez dans une heure." }, 429);
     const body = await readBody(request);
     if (!body) return badRequest("Informations invalides.");
     const requestItem = await env.DB.prepare("SELECT id, requester_id, title FROM service_requests WHERE id = ? AND status = 'open'")
@@ -627,6 +853,7 @@ async function handleApi(request: Request, env: Env, ctx: ExecutionContext): Pro
       ]);
     }
     const requester = await env.DB.prepare("SELECT email, full_name FROM profiles WHERE id = ?").bind(requestItem.requester_id).first<{ email: string; full_name: string }>();
+    await createNotification(env, requestItem.requester_id, "offer", "Nouvelle réponse", `${user.full_name} a répondu à votre demande : ${requestItem.title}.`, `/app/messages?conversation=${conversationId}`);
     if (requester) ctx.waitUntil(sendEmail(env, requester.email, "Nouvelle réponse sur ServiceGO", `<p>Bonjour ${escapeHtml(requester.full_name)},</p><p>${escapeHtml(user.full_name)} a répondu à votre demande : ${escapeHtml(requestItem.title)}.</p>`));
     return json({ id, conversation_id: conversationId, message: "Votre réponse a été envoyée. La discussion est ouverte." }, 201);
   }
@@ -650,6 +877,7 @@ async function handleApi(request: Request, env: Env, ctx: ExecutionContext): Pro
       env.DB.prepare("UPDATE service_requests SET status = 'assigned', updated_at = CURRENT_TIMESTAMP WHERE id = ?").bind(offer.request_id),
     ]);
     const conversationId = await findOrCreateConversation(env, offer.request_id, user.id, offer.provider_id);
+    await createNotification(env, offer.provider_id, "service_update", "Réponse acceptée", `Votre réponse à « ${offer.title} » a été acceptée.`, `/app/messages?conversation=${conversationId}`);
     return json({ conversation_id: conversationId, message: "Réponse acceptée. La discussion est ouverte." });
   }
 
@@ -682,6 +910,7 @@ async function handleApi(request: Request, env: Env, ctx: ExecutionContext): Pro
     await env.DB.prepare("INSERT INTO messages (id, conversation_id, sender_id, body) VALUES (?, ?, ?, ?)")
       .bind(crypto.randomUUID(), conversationId, user.id, description)
       .run();
+    await createNotification(env, service.user_id, "offer", "Nouvelle demande directe", `${user.full_name} souhaite vous contacter pour « ${service.title} ».`, `/app/messages?conversation=${conversationId}`);
     return json({ request_id: requestId, conversation_id: conversationId, message: "Votre demande a été envoyée directement." }, 201);
   }
 
@@ -805,6 +1034,7 @@ async function handleApi(request: Request, env: Env, ctx: ExecutionContext): Pro
     if (request.method === "POST") {
       const verificationError = requireVerifiedUser(user);
       if (verificationError) return verificationError;
+      if (!(await consumeRateLimit(env, "message", `${user.id}:${conversation.id}`, 60, 60))) return json({ error: "Trop de messages. Réessayez dans une minute." }, 429);
       const body = await readBody(request);
       const message = text(body?.body, 2000);
       const messageType = text(body?.message_type, 20) || "text";
@@ -814,13 +1044,16 @@ async function handleApi(request: Request, env: Env, ctx: ExecutionContext): Pro
       const latitude = Number(body?.latitude);
       const longitude = Number(body?.longitude);
       if (messageType === "text" && !message) return badRequest("Écrivez un message.");
-      if (["image", "video", "audio"].includes(messageType) && (!validUploadKey(mediaKey, user.id) || !mediaMime)) return badRequest("Pièce jointe invalide.");
+      if (["image", "video", "audio"].includes(messageType) && (!(await ownsUpload(env, mediaKey, user.id, ["message"])) || !mediaMime)) return badRequest("Pièce jointe invalide.");
       if (messageType === "location" && !validCoordinates(latitude, longitude)) return badRequest("Localisation invalide.");
       await env.DB.batch([
         env.DB.prepare("INSERT INTO messages (id, conversation_id, sender_id, body, message_type, media_key, media_mime, latitude, longitude) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)")
           .bind(crypto.randomUUID(), conversation.id, user.id, message, messageType, mediaKey || null, mediaMime || null, messageType === "location" ? latitude : null, messageType === "location" ? longitude : null),
         env.DB.prepare("UPDATE conversations SET updated_at = CURRENT_TIMESTAMP WHERE id = ?").bind(conversation.id),
       ]);
+      const recipientId = await env.DB.prepare("SELECT CASE WHEN user_a_id = ? THEN user_b_id ELSE user_a_id END AS id FROM conversations WHERE id = ?")
+        .bind(user.id, conversation.id).first<{ id: string }>();
+      if (recipientId) await createNotification(env, recipientId.id, "message", "Nouveau message", `${user.full_name} vous a envoyé un message.`, `/app/messages?conversation=${conversation.id}`);
       return json({ ok: true }, 201);
     }
     return json({ error: "Méthode non autorisée." }, 405);
@@ -831,6 +1064,7 @@ async function handleApi(request: Request, env: Env, ctx: ExecutionContext): Pro
     if (isResponse(user)) return user;
     const verificationError = requireVerifiedUser(user);
     if (verificationError) return verificationError;
+    if (!(await consumeRateLimit(env, "upload", user.id, 30, 3600))) return json({ error: "Trop d'envois de fichiers. Réessayez dans une heure." }, 429);
     const uploads = env.UPLOADS;
     if (!uploads) return json({ error: "Le stockage des fichiers n'est pas configuré." }, 503);
     const form = await request.formData();
