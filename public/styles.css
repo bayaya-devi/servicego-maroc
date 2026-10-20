@@ -236,7 +236,7 @@ body[data-space="member"] .selection { top:92px;background:var(--sg-glass-member
 .profile-heading { display:flex;align-items:flex-start;justify-content:space-between;gap:18px }.profile-settings { flex:0 0 46px;border:1px solid var(--sg-glass-border);background:var(--sg-glass-member);box-shadow:var(--sg-depth-1) }.profile-actions { display:flex;flex-wrap:wrap;gap:8px;margin-top:18px }.profile-box { min-height:160px }.profile-main { min-height:340px }
 .settings-section { margin-top:20px;padding-top:18px;border-top:1px solid var(--sg-line) }.settings-section h3 { margin:0 0 12px;font-size:var(--sg-text-section) }.settings-languages { display:grid;grid-template-columns:repeat(3,1fr);gap:7px }.settings-languages button { min-height:44px;padding:8px;border:1px solid var(--sg-line);border-radius:7px;color:var(--sg-ink);background:transparent;font-weight:800 }.settings-languages button.active { color:#fff;border-color:var(--sg-blue);background:var(--sg-blue) }
 .faq-list details { transition:background var(--sg-motion-fast) ease }.faq-list details[open] { background:rgba(37,133,230,.055) }.faq-list summary { padding-inline:8px }.faq-list details p { padding-inline:8px }
-.legal-content { transition:opacity var(--sg-motion-fast) ease,transform var(--sg-motion-fast) ease }.legal-content .contact-email { margin:20px 0 12px }
+.legal-content { transition:opacity var(--sg-motion-fast) ease,transform var(--sg-motion-fast) ease }.legal-content p + p { margin-top:12px }.legal-content .contact-email { margin:20px 0 12px }
 
 @media (max-width:760px) {
   .language-nucleus { top:auto;bottom:calc(100% + 12px) }
