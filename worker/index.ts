@@ -2,9 +2,13 @@ type User = {
   id: string;
   email: string;
   full_name: string;
+  first_name: string | null;
+  last_name: string | null;
   phone: string | null;
   district: string;
   avatar_url: string | null;
+  cover_url: string | null;
+  dashboard_prefs: string;
   bio: string | null;
   rating: number;
   review_count: number;
@@ -13,6 +17,7 @@ type User = {
 };
 
 type AuthUser = User & { password_hash: string };
+type UploadMetadata = { contentType: string; userId: string; purpose: string };
 
 const jsonHeaders = {
   "content-type": "application/json; charset=utf-8",
@@ -21,7 +26,6 @@ const jsonHeaders = {
   "referrer-policy": "same-origin",
 };
 
-const moroccoBounds = { minLat: 27.55, maxLat: 35.95, minLng: -13.25, maxLng: -1.0 };
 const passwordIterations = 100000;
 
 function json(data: unknown, status = 200, headers: HeadersInit = {}): Response {
@@ -48,15 +52,24 @@ function validEmail(value: string): boolean {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value) && value.length <= 254;
 }
 
-function insideMorocco(latitude: number, longitude: number): boolean {
+function validCoordinates(latitude: number, longitude: number): boolean {
   return (
     Number.isFinite(latitude) &&
     Number.isFinite(longitude) &&
-    latitude >= moroccoBounds.minLat &&
-    latitude <= moroccoBounds.maxLat &&
-    longitude >= moroccoBounds.minLng &&
-    longitude <= moroccoBounds.maxLng
+    latitude >= -85.051129 &&
+    latitude <= 85.051129 &&
+    longitude >= -180 &&
+    longitude <= 180
   );
+}
+
+function validUploadKey(key: string, ownerId?: string): boolean {
+  const match = key.match(/^uploads\/([A-Za-z0-9_-]{1,80})\/[0-9a-f-]{36}\.[a-z0-9]{1,10}$/);
+  return Boolean(match && (!ownerId || match[1] === ownerId));
+}
+
+function validOwnedFileUrl(value: string, ownerId: string): boolean {
+  return value === "" || (value.startsWith("/api/files/") && validUploadKey(value.slice("/api/files/".length), ownerId));
 }
 
 function getCookie(request: Request, name: string): string | null {
@@ -82,7 +95,7 @@ function toHex(bytes: ArrayBuffer): string {
   return [...new Uint8Array(bytes)].map((byte) => byte.toString(16).padStart(2, "0")).join("");
 }
 
-function fromHex(value: string): Uint8Array {
+function fromHex(value: string): Uint8Array<ArrayBuffer> {
   const bytes = new Uint8Array(value.length / 2);
   for (let i = 0; i < bytes.length; i += 1) bytes[i] = Number.parseInt(value.slice(i * 2, i * 2 + 2), 16);
   return bytes;
@@ -139,7 +152,7 @@ async function currentUser(request: Request, env: Env): Promise<User | null> {
   const sessionId = getCookie(request, "sg_session");
   if (!sessionId) return null;
   return env.DB.prepare(
-    `SELECT p.id, p.email, p.full_name, p.phone, p.district, p.avatar_url, p.bio, p.rating, p.review_count, p.is_admin, p.email_verified
+    `SELECT p.id, p.email, p.full_name, p.first_name, p.last_name, p.phone, p.district, p.avatar_url, p.cover_url, p.dashboard_prefs, p.bio, p.rating, p.review_count, p.is_admin, p.email_verified
      FROM sessions s JOIN profiles p ON p.id = s.user_id
      WHERE s.id = ? AND s.expires_at > datetime('now') AND p.is_active = 1`,
   )
@@ -232,10 +245,33 @@ async function findOrCreateConversation(env: Env, requestId: string, firstUserId
     .first<{ id: string }>();
   if (existing) return existing.id;
   const id = crypto.randomUUID();
-  await env.DB.prepare("INSERT INTO conversations (id, request_id, user_a_id, user_b_id) VALUES (?, ?, ?, ?)")
-    .bind(id, requestId, firstUserId, secondUserId)
-    .run();
-  return id;
+  try {
+    await env.DB.prepare("INSERT INTO conversations (id, request_id, user_a_id, user_b_id) VALUES (?, ?, ?, ?)")
+      .bind(id, requestId, firstUserId, secondUserId)
+      .run();
+    return id;
+  } catch (error) {
+    const winner = await env.DB.prepare(
+      `SELECT id FROM conversations WHERE request_id = ?
+       AND ((user_a_id = ? AND user_b_id = ?) OR (user_a_id = ? AND user_b_id = ?))`,
+    ).bind(requestId, firstUserId, secondUserId, secondUserId, firstUserId).first<{ id: string }>();
+    if (winner) return winner.id;
+    throw error;
+  }
+}
+
+async function refreshPublishedRatings(env: Env): Promise<void> {
+  await env.DB.prepare(
+    `UPDATE profiles SET
+       rating = COALESCE((SELECT ROUND(AVG(rv.rating), 2) FROM reviews rv
+         WHERE rv.reviewed_id = profiles.id AND (rv.publish_after <= CURRENT_TIMESTAMP OR
+           (SELECT COUNT(*) FROM reviews pair WHERE pair.request_id = rv.request_id) >= 2)), 5),
+       review_count = (SELECT COUNT(*) FROM reviews rv
+         WHERE rv.reviewed_id = profiles.id AND (rv.publish_after <= CURRENT_TIMESTAMP OR
+           (SELECT COUNT(*) FROM reviews pair WHERE pair.request_id = rv.request_id) >= 2)),
+       updated_at = CURRENT_TIMESTAMP
+     WHERE EXISTS (SELECT 1 FROM reviews rv WHERE rv.reviewed_id = profiles.id)`,
+  ).run();
 }
 
 async function handleAuth(request: Request, env: Env, ctx: ExecutionContext, pathname: string): Promise<Response | null> {
@@ -286,15 +322,20 @@ async function handleAuth(request: Request, env: Env, ctx: ExecutionContext, pat
   if (!validEmail(email) || password.length < 8) return badRequest("Utilisez une adresse e-mail valide et un mot de passe d'au moins 8 caractères.");
 
   if (pathname === "/api/auth/register") {
-    const fullName = text(body.full_name, 80);
+    const firstName = text(body.first_name, 40);
+    const lastName = text(body.last_name, 40);
+    const fullName = text(body.full_name, 80) || `${firstName} ${lastName}`.trim();
     const district = text(body.district, 80) || "Non renseignée";
     if (fullName.length < 2) return badRequest("Indiquez votre prénom et votre nom.");
     if (!(await verifyTurnstile(text(body.turnstile_token, 2048), request, env))) return badRequest("La vérification anti-abus a échoué.");
     const exists = await env.DB.prepare("SELECT id FROM profiles WHERE email = ?").bind(email).first<{ id: string }>();
     if (exists) return json({ error: "Cette adresse e-mail est déjà utilisée. Connectez-vous." }, 409);
     const id = crypto.randomUUID();
-    await env.DB.prepare("INSERT INTO profiles (id, email, password_hash, full_name, phone, district) VALUES (?, ?, ?, ?, ?, ?)")
-      .bind(id, email, await passwordHash(password), fullName, text(body.phone, 30) || null, district)
+    const splitAt = fullName.indexOf(" ");
+    const storedFirstName = firstName || (splitAt > 0 ? fullName.slice(0, splitAt) : fullName);
+    const storedLastName = lastName || (splitAt > 0 ? fullName.slice(splitAt + 1) : "");
+    await env.DB.prepare("INSERT INTO profiles (id, email, password_hash, full_name, first_name, last_name, phone, district) VALUES (?, ?, ?, ?, ?, ?, ?, ?)")
+      .bind(id, email, await passwordHash(password), fullName, storedFirstName, storedLastName, text(body.phone, 30) || null, district)
       .run();
     const sessionId = await createSession(id, env);
     const verificationToken = await createEmailVerification(env, id, email, "signup");
@@ -307,7 +348,7 @@ async function handleAuth(request: Request, env: Env, ctx: ExecutionContext, pat
   }
 
   const account = await env.DB.prepare(
-    "SELECT id, email, full_name, phone, district, avatar_url, bio, rating, review_count, is_admin, email_verified, password_hash FROM profiles WHERE email = ? AND is_active = 1",
+    "SELECT id, email, full_name, first_name, last_name, phone, district, avatar_url, cover_url, dashboard_prefs, bio, rating, review_count, is_admin, email_verified, password_hash FROM profiles WHERE email = ? AND is_active = 1",
   )
     .bind(email)
     .first<AuthUser>();
@@ -375,13 +416,22 @@ async function handleApi(request: Request, env: Env, ctx: ExecutionContext): Pro
     if (isResponse(user)) return user;
     const body = await readBody(request);
     if (!body) return badRequest("Informations invalides.");
-    const fullName = text(body.full_name, 80);
+    const firstName = text(body.first_name, 40);
+    const lastName = text(body.last_name, 40);
+    const fullName = text(body.full_name, 80) || `${firstName} ${lastName}`.trim();
     const phone = text(body.phone, 30);
     const district = text(body.district, 80);
     const bio = text(body.bio, 500);
+    const avatarUrl = text(body.avatar_url, 500);
+    const coverUrl = text(body.cover_url, 500);
+    const allowedPrefs = { activity: true, exchanges: true, tracking: true };
+    if (body.dashboard_prefs && typeof body.dashboard_prefs === "object" && !Array.isArray(body.dashboard_prefs)) {
+      for (const key of Object.keys(allowedPrefs) as Array<keyof typeof allowedPrefs>) allowedPrefs[key] = body.dashboard_prefs[key] !== false;
+    }
     if (fullName.length < 2) return badRequest("Indiquez votre prénom et votre nom.");
-    await env.DB.prepare("UPDATE profiles SET full_name = ?, phone = ?, district = ?, bio = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?")
-      .bind(fullName, phone || null, district || "Rabat", bio || null, user.id)
+    if (!validOwnedFileUrl(avatarUrl, user.id) || !validOwnedFileUrl(coverUrl, user.id)) return badRequest("Fichier de profil invalide.");
+    await env.DB.prepare("UPDATE profiles SET full_name = ?, first_name = ?, last_name = ?, phone = ?, district = ?, bio = ?, avatar_url = ?, cover_url = ?, dashboard_prefs = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?")
+      .bind(fullName, firstName || fullName, lastName, phone || null, district || "Non renseignée", bio || null, avatarUrl || null, coverUrl || null, JSON.stringify(allowedPrefs), user.id)
       .run();
     return json({ user: await currentUser(request, env) });
   }
@@ -471,8 +521,8 @@ async function handleApi(request: Request, env: Env, ctx: ExecutionContext): Pro
     const latitude = Number(body.latitude);
     const longitude = Number(body.longitude);
     const urgency = body.urgency === "urgent" ? "urgent" : "normal";
-    if (!categoryId || title.length < 3 || description.length < 5 || !insideMorocco(latitude, longitude)) {
-      return badRequest("Complétez la demande et choisissez une position au Maroc.");
+    if (!categoryId || title.length < 3 || description.length < 5 || !validCoordinates(latitude, longitude)) {
+      return badRequest("Complétez la demande et choisissez une position valide sur la carte.");
     }
     const category = await env.DB.prepare("SELECT id FROM categories WHERE id = ?").bind(categoryId).first<{ id: string }>();
     if (!category) return badRequest("Catégorie inconnue.");
@@ -511,8 +561,8 @@ async function handleApi(request: Request, env: Env, ctx: ExecutionContext): Pro
     const district = text(body.district, 80) || "Rabat";
     const latitude = Number(body.latitude);
     const longitude = Number(body.longitude);
-    if (!categoryId || title.length < 3 || description.length < 5 || !insideMorocco(latitude, longitude)) {
-      return badRequest("Complétez le service et choisissez une position au Maroc.");
+    if (!categoryId || title.length < 3 || description.length < 5 || !validCoordinates(latitude, longitude)) {
+      return badRequest("Complétez le service et choisissez une position valide sur la carte.");
     }
     const category = await env.DB.prepare("SELECT id FROM categories WHERE id = ?").bind(categoryId).first<{ id: string }>();
     if (!category) return badRequest("Catégorie inconnue.");
@@ -565,9 +615,20 @@ async function handleApi(request: Request, env: Env, ctx: ExecutionContext): Pro
     } catch {
       return json({ error: "Vous avez déjà répondu à cette demande." }, 409);
     }
+    const conversationId = await findOrCreateConversation(env, requestItem.id, requestItem.requester_id, user.id);
+    const existingMessage = await env.DB.prepare("SELECT id FROM messages WHERE conversation_id = ? AND sender_id = ? LIMIT 1")
+      .bind(conversationId, user.id)
+      .first<{ id: string }>();
+    if (!existingMessage) {
+      await env.DB.batch([
+        env.DB.prepare("INSERT INTO messages (id, conversation_id, sender_id, body, message_type) VALUES (?, ?, ?, ?, 'text')")
+          .bind(crypto.randomUUID(), conversationId, user.id, message),
+        env.DB.prepare("UPDATE conversations SET updated_at = CURRENT_TIMESTAMP WHERE id = ?").bind(conversationId),
+      ]);
+    }
     const requester = await env.DB.prepare("SELECT email, full_name FROM profiles WHERE id = ?").bind(requestItem.requester_id).first<{ email: string; full_name: string }>();
     if (requester) ctx.waitUntil(sendEmail(env, requester.email, "Nouvelle réponse sur ServiceGO", `<p>Bonjour ${escapeHtml(requester.full_name)},</p><p>${escapeHtml(user.full_name)} a répondu à votre demande : ${escapeHtml(requestItem.title)}.</p>`));
-    return json({ id, message: "Votre réponse a été envoyée." }, 201);
+    return json({ id, conversation_id: conversationId, message: "Votre réponse a été envoyée. La discussion est ouverte." }, 201);
   }
 
   const acceptMatch = pathname.match(/^\/api\/offers\/([^/]+)\/accept$/);
@@ -609,11 +670,11 @@ async function handleApi(request: Request, env: Env, ctx: ExecutionContext): Pro
     const description = text(body.description, 1200);
     const latitude = Number(body.latitude);
     const longitude = Number(body.longitude);
-    if (description.length < 5 || !insideMorocco(latitude, longitude)) return badRequest("Ajoutez une description et une position au Maroc.");
+    if (description.length < 5 || !validCoordinates(latitude, longitude)) return badRequest("Ajoutez une description et une position valide.");
     const requestId = crypto.randomUUID();
     await env.DB.prepare(
-      `INSERT INTO service_requests (id, requester_id, target_service_id, category_id, title, description, district, latitude, longitude, urgency, budget_hint)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO service_requests (id, requester_id, target_service_id, category_id, title, description, district, latitude, longitude, urgency, budget_hint, status)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'assigned')`,
     )
       .bind(requestId, user.id, service.id, service.category_id, title, description, text(body.district, 80) || "Rabat", latitude, longitude, body.urgency === "urgent" ? "urgent" : "normal", text(body.budget_hint, 80) || null)
       .run();
@@ -624,19 +685,94 @@ async function handleApi(request: Request, env: Env, ctx: ExecutionContext): Pro
     return json({ request_id: requestId, conversation_id: conversationId, message: "Votre demande a été envoyée directement." }, 201);
   }
 
+  const completeMatch = pathname.match(/^\/api\/requests\/([^/]+)\/complete$/);
+  if (completeMatch && request.method === "POST") {
+    const user = await requireUser(request, env);
+    if (isResponse(user)) return user;
+    const item = await env.DB.prepare(
+      `SELECT r.id, r.requester_id, COALESCE(o.provider_id, s.user_id) AS provider_id FROM service_requests r
+       LEFT JOIN offers o ON o.request_id = r.id AND o.status = 'accepted'
+       LEFT JOIN user_services s ON s.id = r.target_service_id
+       WHERE r.id = ? AND r.status = 'assigned'`,
+    ).bind(completeMatch[1]).first<{ id: string; requester_id: string; provider_id: string }>();
+    if (!item || (item.requester_id !== user.id && item.provider_id !== user.id)) return notFound();
+    await env.DB.prepare("UPDATE service_requests SET status = 'completed', completed_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP WHERE id = ?")
+      .bind(item.id).run();
+    return json({ message: "Le service est marqué comme terminé. Les deux participants peuvent maintenant s'évaluer." });
+  }
+
+  const reviewMatch = pathname.match(/^\/api\/requests\/([^/]+)\/reviews$/);
+  if (reviewMatch && request.method === "POST") {
+    const user = await requireUser(request, env);
+    if (isResponse(user)) return user;
+    const verificationError = requireVerifiedUser(user);
+    if (verificationError) return verificationError;
+    const body = await readBody(request);
+    const score = Number(body?.rating);
+    const comment = text(body?.comment, 500);
+    if (!Number.isInteger(score) || score < 1 || score > 5) return badRequest("Choisissez une note de 1 à 5 étoiles.");
+    const item = await env.DB.prepare(
+      `SELECT r.id, r.requester_id, COALESCE(o.provider_id, s.user_id) AS provider_id FROM service_requests r
+       LEFT JOIN offers o ON o.request_id = r.id AND o.status = 'accepted'
+       LEFT JOIN user_services s ON s.id = r.target_service_id
+       WHERE r.id = ? AND r.status = 'completed'`,
+    ).bind(reviewMatch[1]).first<{ id: string; requester_id: string; provider_id: string }>();
+    if (!item || (item.requester_id !== user.id && item.provider_id !== user.id)) return notFound();
+    const reviewedId = user.id === item.requester_id ? item.provider_id : item.requester_id;
+    try {
+      await env.DB.prepare("INSERT INTO reviews (id, request_id, reviewer_id, reviewed_id, rating, comment, publish_after) VALUES (?, ?, ?, ?, ?, ?, datetime('now', '+7 days'))")
+        .bind(crypto.randomUUID(), item.id, user.id, reviewedId, score, comment || null).run();
+    } catch {
+      return json({ error: "Vous avez déjà évalué ce service." }, 409);
+    }
+    const participants = [item.requester_id, item.provider_id];
+    for (const profileId of participants) {
+      const aggregate = await env.DB.prepare(
+        `SELECT ROUND(AVG(rv.rating), 2) AS rating, COUNT(*) AS review_count FROM reviews rv
+         WHERE rv.reviewed_id = ? AND (rv.publish_after <= CURRENT_TIMESTAMP OR
+           (SELECT COUNT(*) FROM reviews pair WHERE pair.request_id = rv.request_id) >= 2)`,
+      ).bind(profileId).first<{ rating: number | null; review_count: number }>();
+      await env.DB.prepare("UPDATE profiles SET rating = ?, review_count = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?")
+        .bind(aggregate?.rating ?? 5, aggregate?.review_count ?? 0, profileId).run();
+    }
+    return json({ message: "Votre évaluation est enregistrée. Elle sera publiée après l'autre avis ou dans sept jours." }, 201);
+  }
+
+  if (pathname === "/api/activity" && request.method === "GET") {
+    const user = await requireUser(request, env);
+    if (isResponse(user)) return user;
+    const [replied, reviews] = await Promise.all([
+      env.DB.prepare(
+        `SELECT r.id, r.title, r.status, r.completed_at, o.status AS offer_status
+         FROM offers o JOIN service_requests r ON r.id = o.request_id
+         WHERE o.provider_id = ? ORDER BY o.created_at DESC LIMIT 50`,
+      ).bind(user.id).all(),
+      env.DB.prepare(
+        `SELECT rv.id, rv.rating, rv.comment, rv.created_at, p.full_name AS reviewer_name, r.title AS request_title
+         FROM reviews rv JOIN profiles p ON p.id = rv.reviewer_id JOIN service_requests r ON r.id = rv.request_id
+         WHERE rv.reviewed_id = ? AND (rv.publish_after <= CURRENT_TIMESTAMP OR
+           (SELECT COUNT(*) FROM reviews pair WHERE pair.request_id = rv.request_id) >= 2)
+         ORDER BY rv.created_at DESC LIMIT 50`,
+      ).bind(user.id).all(),
+    ]);
+    return json({ replied: replied.results, reviews: reviews.results });
+  }
+
   if (pathname === "/api/conversations" && request.method === "GET") {
     const user = await requireUser(request, env);
     if (isResponse(user)) return user;
     const { results } = await env.DB.prepare(
-      `SELECT c.id, c.request_id, c.updated_at, r.title AS request_title,
+      `SELECT c.id, c.request_id, c.updated_at, r.title AS request_title, r.status AS request_status,
        CASE WHEN c.user_a_id = ? THEN p_b.full_name ELSE p_a.full_name END AS other_name,
-       (SELECT body FROM messages m WHERE m.conversation_id = c.id ORDER BY m.created_at DESC LIMIT 1) AS last_message
+       CASE WHEN c.user_a_id = ? THEN p_b.avatar_url ELSE p_a.avatar_url END AS other_avatar_url,
+       (SELECT CASE m.message_type WHEN 'image' THEN 'Image' WHEN 'video' THEN 'Vidéo' WHEN 'audio' THEN 'Message vocal' WHEN 'location' THEN 'Localisation' ELSE m.body END FROM messages m WHERE m.conversation_id = c.id ORDER BY m.created_at DESC LIMIT 1) AS last_message,
+       (SELECT COUNT(*) FROM messages m WHERE m.conversation_id = c.id AND m.sender_id <> ? AND m.rowid > COALESCE((SELECT cr.last_message_rowid FROM conversation_reads cr WHERE cr.conversation_id = c.id AND cr.user_id = ?), 0)) AS unread_count
        FROM conversations c
        JOIN profiles p_a ON p_a.id = c.user_a_id JOIN profiles p_b ON p_b.id = c.user_b_id
        LEFT JOIN service_requests r ON r.id = c.request_id
        WHERE c.user_a_id = ? OR c.user_b_id = ? ORDER BY c.updated_at DESC`,
     )
-      .bind(user.id, user.id, user.id)
+      .bind(user.id, user.id, user.id, user.id, user.id, user.id)
       .all();
     return json({ conversations: results });
   }
@@ -651,11 +787,18 @@ async function handleApi(request: Request, env: Env, ctx: ExecutionContext): Pro
     if (!conversation) return notFound();
     if (request.method === "GET") {
       const { results } = await env.DB.prepare(
-        `SELECT m.id, m.body, m.created_at, m.sender_id, p.full_name AS sender_name
+        `SELECT m.id, m.body, m.message_type, m.media_key, m.media_mime, m.latitude, m.longitude, m.created_at, m.sender_id, p.full_name AS sender_name
          FROM messages m JOIN profiles p ON p.id = m.sender_id WHERE m.conversation_id = ? ORDER BY m.created_at ASC`,
       )
         .bind(conversation.id)
         .all();
+      await env.DB.prepare(`INSERT INTO conversation_reads (conversation_id, user_id, read_at, last_message_rowid)
+        VALUES (?, ?, CURRENT_TIMESTAMP, COALESCE((SELECT MAX(rowid) FROM messages WHERE conversation_id = ?), 0))
+        ON CONFLICT(conversation_id, user_id) DO UPDATE SET
+          read_at = CURRENT_TIMESTAMP,
+          last_message_rowid = excluded.last_message_rowid`)
+        .bind(conversation.id, user.id, conversation.id)
+        .run();
       return json({ messages: results });
     }
     if (request.method === "POST") {
@@ -663,10 +806,18 @@ async function handleApi(request: Request, env: Env, ctx: ExecutionContext): Pro
       if (verificationError) return verificationError;
       const body = await readBody(request);
       const message = text(body?.body, 2000);
-      if (!message) return badRequest("Écrivez un message.");
+      const messageType = text(body?.message_type, 20) || "text";
+      if (!new Set(["text", "image", "video", "audio", "location"]).has(messageType)) return badRequest("Type de message invalide.");
+      const mediaKey = text(body?.media_key, 500);
+      const mediaMime = text(body?.media_mime, 100);
+      const latitude = Number(body?.latitude);
+      const longitude = Number(body?.longitude);
+      if (messageType === "text" && !message) return badRequest("Écrivez un message.");
+      if (["image", "video", "audio"].includes(messageType) && (!validUploadKey(mediaKey, user.id) || !mediaMime)) return badRequest("Pièce jointe invalide.");
+      if (messageType === "location" && !validCoordinates(latitude, longitude)) return badRequest("Localisation invalide.");
       await env.DB.batch([
-        env.DB.prepare("INSERT INTO messages (id, conversation_id, sender_id, body) VALUES (?, ?, ?, ?)")
-          .bind(crypto.randomUUID(), conversation.id, user.id, message),
+        env.DB.prepare("INSERT INTO messages (id, conversation_id, sender_id, body, message_type, media_key, media_mime, latitude, longitude) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)")
+          .bind(crypto.randomUUID(), conversation.id, user.id, message, messageType, mediaKey || null, mediaMime || null, messageType === "location" ? latitude : null, messageType === "location" ? longitude : null),
         env.DB.prepare("UPDATE conversations SET updated_at = CURRENT_TIMESTAMP WHERE id = ?").bind(conversation.id),
       ]);
       return json({ ok: true }, 201);
@@ -679,30 +830,42 @@ async function handleApi(request: Request, env: Env, ctx: ExecutionContext): Pro
     if (isResponse(user)) return user;
     const verificationError = requireVerifiedUser(user);
     if (verificationError) return verificationError;
-    const uploads = (env as Env & { UPLOADS?: R2Bucket }).UPLOADS;
-    if (!uploads) return json({ error: "Les photos seront disponibles prochainement." }, 503);
+    const uploads = env.UPLOADS;
+    if (!uploads) return json({ error: "Le stockage des fichiers n'est pas configuré." }, 503);
     const form = await request.formData();
     const file = form.get("file");
-    if (!(file instanceof File) || file.size === 0 || file.size > 6 * 1024 * 1024) return badRequest("Choisissez une image de 6 Mo maximum.");
-    if (!file.type.startsWith("image/")) return badRequest("Seules les images sont acceptées.");
+    const allowedTypes = new Set(["image/jpeg", "image/png", "image/webp", "image/gif", "video/mp4", "video/webm", "audio/webm", "audio/ogg", "audio/mpeg", "audio/mp4"]);
+    if (!(file instanceof File) || file.size === 0) return badRequest("Choisissez un fichier valide.");
+    if (!allowedTypes.has(file.type)) return badRequest("Ce format de fichier n'est pas accepté.");
+    const maxSize = file.type.startsWith("image/") ? 8 * 1024 * 1024 : file.type.startsWith("audio/") ? 15 * 1024 * 1024 : 24 * 1024 * 1024;
+    if (file.size > maxSize) return badRequest("Ce fichier dépasse la taille autorisée.");
     const extension = file.name.split(".").pop()?.toLowerCase().replace(/[^a-z0-9]/g, "") || "jpg";
     const key = `uploads/${user.id}/${crypto.randomUUID()}.${extension}`;
-    await uploads.put(key, file.stream(), { httpMetadata: { contentType: file.type }, customMetadata: { userId: user.id } });
+    await uploads.put(key, file.stream(), { metadata: { contentType: file.type, userId: user.id, purpose: text(form.get("purpose"), 30) || "attachment" } satisfies UploadMetadata });
     return json({ key, url: `/api/files/${key}` }, 201);
   }
 
   if (pathname.startsWith("/api/files/") && request.method === "GET") {
-    const uploads = (env as Env & { UPLOADS?: R2Bucket }).UPLOADS;
+    const user = await requireUser(request, env);
+    if (isResponse(user)) return user;
+    const uploads = env.UPLOADS;
     if (!uploads) return notFound();
     const key = decodeURIComponent(pathname.slice("/api/files/".length));
-    if (!key.startsWith("uploads/") || key.includes("..")) return notFound();
-    const object = await uploads.get(key);
-    if (!object) return notFound();
-    const headers = new Headers();
-    object.writeHttpMetadata(headers);
-    headers.set("etag", object.httpEtag);
+    if (!validUploadKey(key)) return notFound();
+    const owned = validUploadKey(key, user.id);
+    const referenced = owned || Boolean(await env.DB.prepare(
+      `SELECT 1 FROM profiles WHERE avatar_url = ? OR cover_url = ?
+       UNION ALL SELECT 1 FROM service_requests WHERE photo_key = ?
+       UNION ALL SELECT 1 FROM messages m JOIN conversations c ON c.id = m.conversation_id
+       WHERE m.media_key = ? AND (c.user_a_id = ? OR c.user_b_id = ?) LIMIT 1`,
+    ).bind(`/api/files/${key}`, `/api/files/${key}`, key, key, user.id, user.id).first());
+    if (!referenced) return notFound();
+    const object = await uploads.getWithMetadata<UploadMetadata>(key, "stream");
+    if (!object.value) return notFound();
+    const headers = new Headers({ "content-type": object.metadata?.contentType || "application/octet-stream" });
     headers.set("cache-control", "private, max-age=86400");
-    return new Response(object.body, { headers });
+    headers.set("x-content-type-options", "nosniff");
+    return new Response(object.value, { headers });
   }
 
   return notFound();
@@ -719,5 +882,8 @@ export default {
       console.error(JSON.stringify({ event: "api_error", path: url.pathname, message }));
       return json({ error: "Une erreur est survenue. Réessayez." }, 500);
     }
+  },
+  async scheduled(_controller, env, ctx): Promise<void> {
+    ctx.waitUntil(refreshPublishedRatings(env));
   },
 } satisfies ExportedHandler<Env>;

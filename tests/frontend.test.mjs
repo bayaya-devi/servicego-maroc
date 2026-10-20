@@ -115,23 +115,60 @@ test("the immediate-help CTA opens signup first and sends authenticated users to
   assert.match(styles, /\.discover-arrow,\.urgent-help-cta\s*\{\s*animation:none/);
 });
 
-test("the V2.2 member experience keeps map, messaging and dashboard workflows connected", async () => {
-  const [source, styles] = await Promise.all([read("public/app.js"), read("public/styles.css")]);
-  assert.match(source, /class="map-floating-actions"/);
+test("the V2.3 member experience keeps the worldwide map, rich messaging and dashboard workflows connected", async () => {
+  const [source, styles, worker, migration, readCursorMigration, conversationMigration, wrangler] = await Promise.all([
+    read("public/app.js"),
+    read("public/styles.css"),
+    read("worker/index.ts"),
+    read("migrations/0004_v23_global_messaging_profiles_reviews.sql"),
+    read("migrations/0005_v23_conversation_read_cursor.sql"),
+    read("migrations/0006_v23_conversation_uniqueness.sql"),
+    read("wrangler.jsonc"),
+  ]);
+  assert.doesNotMatch(source, /class="map-floating-actions"/);
   assert.match(source, /data-action="locate-me"/);
   assert.match(source, /class="premium-map-pin/);
   assert.match(source, /class="map-cluster/);
+  assert.match(source, /setTimeout\([\s\S]*600/);
+  assert.match(source, /pointerdown/);
+  assert.match(source, /pointermove/);
+  assert.match(source, /event\.key === "Enter" \|\| event\.key === " "/);
+  assert.match(source, /minZoom:\s*2/);
+  assert.match(source, /worldCopyJump:\s*true/);
+  assert.doesNotMatch(source, /maxBounds:/);
+  assert.match(source, /function currentMapPoint/);
+  assert.match(source, /<span>Ville ou quartier<\/span><input name="district"/);
+  assert.match(source, /class="map-guidance"/);
   assert.match(source, /Proposer mon aide/);
   assert.match(source, /Demander ce service/);
   assert.match(source, /class="glass-back"/);
   assert.match(source, /mobileConversationOpen/);
+  assert.match(source, /message_type/);
+  assert.match(source, /MediaRecorder/);
+  assert.match(source, /data-action="share-message-location"/);
+  assert.match(source, /data-form="review"/);
+  assert.match(source, /dashboard_prefs/);
   for (const label of ["Mon compte", "Mon activité", "Mes échanges", "Mon suivi"]) assert.match(source, new RegExp(label));
   assert.doesNotMatch(source, /class="panel actions-panel"/);
   assert.match(styles, /\.premium-map-pin\s*\{[^}]*background:rgba\(37,133,230/s);
   assert.match(styles, /\.premium-map-pin\.help\s*\{[^}]*background:rgba\(32,164,132/s);
   assert.match(styles, /\.messages-layout\s*\{[^}]*min-height:610px/s);
   assert.match(styles, /\.dashboard-section/);
+  assert.match(styles, /\.messages-page \.messages-layout::before/);
   assert.match(styles, /@media \(max-width:760px\)[\s\S]*\.messages-layout/);
+  assert.match(worker, /validCoordinates/);
+  assert.match(worker, /function validUploadKey/);
+  assert.match(worker, /validOwnedFileUrl\(avatarUrl, user\.id\)/);
+  assert.doesNotMatch(worker, /insideMorocco/);
+  assert.match(worker, /\/api\\\/requests\\\/\(\[\^\/\]\+\)\\\/complete/);
+  assert.match(worker, /\/api\\\/requests\\\/\(\[\^\/\]\+\)\\\/reviews/);
+  assert.match(migration, /CREATE TABLE IF NOT EXISTS reviews/);
+  assert.match(migration, /CREATE TABLE IF NOT EXISTS conversation_reads/);
+  assert.match(readCursorMigration, /last_message_rowid/);
+  assert.match(worker, /m\.rowid > COALESCE/);
+  assert.match(conversationMigration, /CREATE UNIQUE INDEX IF NOT EXISTS conversations_request_pair_unique/);
+  assert.match(worker, /async scheduled/);
+  assert.match(wrangler, /"crons": \["17 3 \* \* \*"\]/);
 });
 
 test("the translation catalog is complete, normalized and valid UTF-8", async () => {
@@ -166,7 +203,12 @@ test("every static interface label and API message has EN and AR translations", 
   for (const pattern of [/badRequest\("([^"]+)"/g, /(?:error|message): "([^"]+)"/g]) {
     for (const match of worker.matchAll(pattern)) candidates.add(match[1].trim());
   }
-  const allowed = new Set(["ServiceGO", "OpenStreetMap", "GO", "FR", "EN", "AR", "2D", "C+", "A/文", "i", "x", "×", "6 12 34 56 78", "aetbconseil@gmail.com", "`).join(\"\") : `"]);
+  const allowed = new Set([
+    "ServiceGO", "OpenStreetMap", "GO", "FR", "EN", "AR", "2D", "C+", "A/文", "i", "x", "×",
+    "6 12 34 56 78", "aetbconseil@gmail.com", "`).join(\"\") : `",
+    "` : draft.type === \"video\" ? `", "` : draft.type === \"audio\" ? `",
+    "` : current.request_status === \"completed\" ? `", "` : item.status === \"completed\" ? `",
+  ]);
   const missing = [...candidates].filter((value) => !allowed.has(value) && (!uiTranslations.en[value] || !uiTranslations.ar[value]));
   assert.deepEqual(missing, [], `missing translations: ${missing.join(" | ")}`);
 });

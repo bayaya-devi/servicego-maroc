@@ -38,12 +38,18 @@ const state = {
   passwordVisible: false,
   mobileConversationOpen: false,
   locating: false,
+  selectedMapPoint: null,
+  messageAttachment: null,
+  voiceRecorder: null,
+  voiceChunks: [],
+  activity: { replied: [], reviews: [] },
 };
 let leafletMap = null;
 let mapMarkerLayer = null;
 let userLocationMarker = null;
 let marketingMap = null;
 let modalReturnAction = null;
+let longPressCleanup = null;
 const cities = {
   Casablanca: [33.5731, -7.5898],
   Rabat: [34.0209, -6.8416],
@@ -66,6 +72,30 @@ function escape(value) {
         c
       ],
   );
+}
+function parseDashboardPrefs(value) {
+  try {
+    const parsed = typeof value === "string" ? JSON.parse(value) : value;
+    return { activity: parsed?.activity !== false, exchanges: parsed?.exchanges !== false, tracking: parsed?.tracking !== false };
+  } catch {
+    return { activity: true, exchanges: true, tracking: true };
+  }
+}
+function safeLinkedText(value) {
+  const source = String(value || "");
+  const pattern = /(https?:\/\/[^\s<]+)/gi;
+  let cursor = 0;
+  let html = "";
+  for (const match of source.matchAll(pattern)) {
+    html += escape(source.slice(cursor, match.index));
+    try {
+      const url = new URL(match[0]);
+      if (url.protocol === "http:" || url.protocol === "https:") html += `<a href="${escape(url.href)}" target="_blank" rel="noopener noreferrer nofollow">${escape(match[0])}</a>`;
+      else html += escape(match[0]);
+    } catch { html += escape(match[0]); }
+    cursor = match.index + match[0].length;
+  }
+  return html + escape(source.slice(cursor));
 }
 function localizeDom() {
   const skipLink = document.querySelector(".skip-link");
@@ -106,6 +136,15 @@ async function api(path, options = {}) {
   if (!response.ok) throw new Error(data.error || "Une erreur est survenue.");
   return data;
 }
+async function uploadFile(file, purpose = "attachment") {
+  const form = new FormData();
+  form.append("file", file);
+  form.append("purpose", purpose);
+  const response = await fetch("/api/uploads", { method: "POST", credentials: "same-origin", body: form });
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(data.error || "Impossible d'envoyer le fichier.");
+  return data;
+}
 function notify(message, isError = false) {
   const old = document.querySelector(".notice");
   old?.remove();
@@ -116,8 +155,14 @@ function notify(message, isError = false) {
   setTimeout(() => element.remove(), 3600);
 }
 function coordsFromCity(city) {
-  const [lat, lng] = cities[city] || cities.Rabat;
+  const [lat, lng] = cities[city] || [20, 0];
   return { latitude: lat, longitude: lng };
+}
+function currentMapPoint(fallbackCity) {
+  const center = leafletMap?.getCenter();
+  return center
+    ? { latitude: Number(center.lat.toFixed(6)), longitude: Number(center.lng.toFixed(6)) }
+    : coordsFromCity(fallbackCity);
 }
 function pointStyle(latitude, longitude, i = 0) {
   const x = Math.max(
@@ -172,6 +217,11 @@ function icon(name) {
     arrowLeft: '<path d="m15 18-6-6 6-6"/>',
     activity: '<path d="M3 12h4l2-6 4 12 2-6h6"/>',
     clock: '<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>',
+    paperclip: '<path d="m21.4 11.6-8.5 8.5a6 6 0 0 1-8.5-8.5l9-9a4 4 0 0 1 5.7 5.7l-9 9a2 2 0 1 1-2.8-2.8l8.3-8.3"/>',
+    mic: '<rect x="9" y="2" width="6" height="12" rx="3"/><path d="M5 10a7 7 0 0 0 14 0M12 17v5M8 22h8"/>',
+    stop: '<rect x="6" y="6" width="12" height="12" rx="2"/>',
+    star: '<path d="m12 2 3 6 6.5 1-4.7 4.6 1.1 6.4-5.9-3.1L6.1 20l1.1-6.4L2.5 9 9 8z"/>',
+    check: '<path d="m5 12 4 4L19 6"/>',
   };
   return `<svg class="sg-icon" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">${paths[name] || paths.plus}</svg>`;
 }
@@ -250,15 +300,14 @@ function accessibleMapList() {
 function mountInteractiveMap() {
   const target = document.querySelector("#liveMap");
   if (!target) return;
+  longPressCleanup?.();
   leafletMap?.remove();
   leafletMap = Leaflet.map(target, {
     zoomControl: true,
-    minZoom: 5,
-    maxBounds: [
-      [26.7, -14.8],
-      [36.5, 0.4],
-    ],
-  }).setView([31.75, -7.1], 6);
+    minZoom: 2,
+    worldCopyJump: true,
+    maxBoundsViscosity: 0,
+  }).setView([20, 0], 2);
   Leaflet.tileLayer(state.config.mapTileUrl, {
     maxZoom: 19,
     attribution: state.config.mapAttribution,
@@ -279,7 +328,7 @@ function mountInteractiveMap() {
     mapMarkerLayer?.remove();
     mapMarkerLayer = Leaflet.layerGroup().addTo(leafletMap);
     const zoom = leafletMap.getZoom();
-    const cell = zoom <= 6 ? .55 : zoom <= 8 ? .2 : zoom <= 10 ? .07 : 0;
+    const cell = zoom <= 2 ? 28 : zoom <= 4 ? 8 : zoom <= 6 ? 1.4 : zoom <= 8 ? .2 : zoom <= 10 ? .07 : 0;
     const groups = new Map();
     entries.forEach((entry, index) => {
       const latitude = Number(entry.item.latitude);
@@ -324,9 +373,51 @@ function mountInteractiveMap() {
   };
   drawMarkers();
   leafletMap.on("zoomend", drawMarkers);
+  let pressTimer = null;
+  let pressStart = null;
+  const cancelPress = () => {
+    if (pressTimer) clearTimeout(pressTimer);
+    pressTimer = null;
+    pressStart = null;
+    target.classList.remove("is-long-pressing");
+  };
+  const openAt = (point) => {
+    state.selectedMapPoint = { latitude: Number(point.lat.toFixed(6)), longitude: Number(point.lng.toFixed(6)) };
+    state.modal = "request";
+    modalReturnAction = "map-create-center";
+    render();
+  };
+  const pointerDown = (event) => {
+    if (event.button !== undefined && event.button !== 0) return;
+    if (event.target.closest(".leaflet-control, .servicego-marker")) return;
+    pressStart = { x: event.clientX, y: event.clientY, point: leafletMap.mouseEventToLatLng(event) };
+    target.classList.add("is-long-pressing");
+    pressTimer = setTimeout(() => {
+      const point = pressStart?.point;
+      cancelPress();
+      if (point) openAt(point);
+    }, 600);
+  };
+  const pointerMove = (event) => {
+    if (!pressStart) return;
+    if (Math.hypot(event.clientX - pressStart.x, event.clientY - pressStart.y) > 10) cancelPress();
+  };
+  target.addEventListener("pointerdown", pointerDown);
+  target.addEventListener("pointermove", pointerMove);
+  target.addEventListener("pointerup", cancelPress);
+  target.addEventListener("pointercancel", cancelPress);
+  target.addEventListener("contextmenu", (event) => event.preventDefault());
+  target.addEventListener("keydown", (event) => {
+    if (event.key === "Enter" || event.key === " ") {
+      event.preventDefault();
+      openAt(leafletMap.getCenter());
+    }
+  });
+  leafletMap.on("movestart zoomstart", cancelPress);
+  longPressCleanup = cancelPress;
   if (!entries.length) {
     Leaflet.popup({ closeButton: false, autoClose: false, closeOnClick: false })
-      .setLatLng([31.75, -7.1])
+      .setLatLng([20, 0])
       .setContent(
         translate(state.locale, "Publiez le premier besoin ou service pour faire apparaître une bulle."),
       )
@@ -383,7 +474,25 @@ function selectedItem() {
   return `<div class="listing-detail"><div class="listing-type ${request ? "need" : "help"}">${icon(request ? "request" : "offer")}<span>${translate(state.locale, request ? "Demande de service" : "Offre de service")}</span></div><h2>${escape(item.title)}</h2>${photo}<dl class="listing-facts"><div><dt>Catégorie</dt><dd>${escape(translate(state.locale, item.category_name || "Service"))}</dd></div><div><dt>${translate(state.locale, request ? "Budget" : "Prix")}</dt><dd>${escape(translate(state.locale, pricing.full))}</dd></div><div><dt>Localisation approximative</dt><dd>${escape(item.district)}</dd></div>${item.created_at ? `<div><dt>Publication</dt><dd>${escape(formatDate(item.created_at))}</dd></div>` : ""}</dl><p class="listing-description">${escape(item.description)}</p><div class="listing-author"><span class="conversation-avatar">${escape(initials(identity))}</span><div><small>Publié par</small><strong>${escape(identity || translate(state.locale, "Utilisateur ServiceGO"))}</strong>${!request && item.rating ? `<span>${Number(item.rating).toFixed(1)} / 5 · ${item.review_count || 0} ${translate(state.locale, "avis")}</span>` : ""}</div></div><div class="detail-actions">${actions}</div></div>`;
 }
 function mapView() {
-  return `<main id="main-content" class="workspace premium-map-workspace" tabindex="-1"><section class="map-panel"><div id="liveMap" class="real-map" aria-label="Carte interactive du Maroc"></div><div class="map-floating-actions"><button class="map-fab request-fab" data-action="open-request" aria-label="Demander un service">${icon("request")}<span>Demander</span></button><button class="map-fab offer-fab" data-action="open-service" aria-label="Proposer un service">${icon("offer")}<span>Proposer</span></button></div><button class="map-locate" data-action="locate-me" aria-label="Activer ma localisation">${icon("location")}</button></section><aside class="panel selection">${selectedItem()}<details class="accessible-list"><summary>Liste accessible</summary>${accessibleMapList()}</details></aside></main>`;
+  return `<main id="main-content" class="workspace premium-map-workspace" tabindex="-1"><section class="map-panel"><div id="liveMap" class="real-map" tabindex="0" aria-label="Carte interactive mondiale. Maintenez appuyé pour créer une demande."></div><button class="map-locate" data-action="locate-me" aria-label="Activer ma localisation">${icon("location")}</button><p class="map-guidance">Pour demander un service, choisissez un emplacement sur la carte et maintenez votre doigt ou votre souris appuyé. Pour proposer votre aide, sélectionnez une bulle de demande et répondez à son auteur. <button data-action="map-create-center">Utiliser le centre de la carte</button></p></section><aside class="panel selection">${selectedItem()}<details class="accessible-list"><summary>Liste accessible</summary>${accessibleMapList()}</details></aside></main>`;
+}
+function messageContent(message) {
+  const type = message.message_type || "text";
+  const source = message.media_key ? `/api/files/${encodeURIComponent(message.media_key)}` : "";
+  if (type === "image" && source) return `<figure class="message-media"><img src="${source}" alt="Image partagée" loading="lazy" /><figcaption>${safeLinkedText(message.body)}</figcaption></figure>`;
+  if (type === "video" && source) return `<figure class="message-media"><video src="${source}" controls preload="metadata"></video><figcaption>${safeLinkedText(message.body)}</figcaption></figure>`;
+  if (type === "audio" && source) return `<div class="voice-message">${icon("mic")}<audio src="${source}" controls preload="metadata"></audio></div>`;
+  if (type === "location" && Number.isFinite(Number(message.latitude)) && Number.isFinite(Number(message.longitude))) {
+    const url = `https://www.openstreetmap.org/?mlat=${encodeURIComponent(message.latitude)}&mlon=${encodeURIComponent(message.longitude)}#map=15/${encodeURIComponent(message.latitude)}/${encodeURIComponent(message.longitude)}`;
+    return `<a class="shared-location" href="${url}" target="_blank" rel="noopener noreferrer">${icon("location")}<span><strong>Localisation partagée</strong><small>${Number(message.latitude).toFixed(4)}, ${Number(message.longitude).toFixed(4)}</small></span></a>`;
+  }
+  return `<p>${safeLinkedText(message.body)}</p>`;
+}
+function messageDraftPreview() {
+  const draft = state.messageAttachment;
+  if (!draft) return "";
+  const content = draft.type === "image" ? `<img src="${draft.url}" alt="Aperçu de l'image" />` : draft.type === "video" ? `<video src="${draft.url}" controls></video>` : draft.type === "audio" ? `<audio src="${draft.url}" controls></audio>` : `<span>${icon("location")} ${Number(draft.latitude).toFixed(4)}, ${Number(draft.longitude).toFixed(4)}</span>`;
+  return `<div class="message-draft-preview">${content}<button type="button" data-action="clear-message-attachment" aria-label="Supprimer la pièce jointe">×</button></div>`;
 }
 function messagesView() {
   const current = state.conversations.find(
@@ -393,17 +502,18 @@ function messagesView() {
     ? state.conversations
         .map(
           (item) =>
-            `<button class="conversation ${item.id === state.activeConversation ? "active" : ""}" data-action="conversation" data-id="${item.id}"><span class="conversation-avatar">${escape(initials(item.other_name))}</span><span class="conversation-copy"><span><strong>${escape(item.other_name)}</strong><time>${escape(formatDate(item.updated_at))}</time></span><small>${escape(item.last_message || item.request_title || "Discussion ServiceGO")}</small></span></button>`,
+            `<button class="conversation ${item.id === state.activeConversation ? "active" : ""}" data-action="conversation" data-id="${item.id}">${item.other_avatar_url ? `<img class="conversation-avatar image" src="${escape(item.other_avatar_url)}" alt="" />` : `<span class="conversation-avatar">${escape(initials(item.other_name))}</span>`}<span class="conversation-copy"><span><strong>${escape(item.other_name)}</strong><time>${escape(formatDate(item.updated_at))}</time></span><small>${escape(item.last_message || item.request_title || "Discussion ServiceGO")}</small></span>${Number(item.unread_count) > 0 ? `<b class="unread-badge" aria-label="${item.unread_count} messages non lus">${Math.min(99, Number(item.unread_count))}</b>` : ""}</button>`,
         )
         .join("")
     : `<div class="empty-state">${icon("messages")}<strong>Aucune conversation</strong><p>Vos échanges apparaîtront ici après une mise en relation.</p></div>`;
   const chat = current
-    ? `<section class="chat ${state.mobileConversationOpen ? "mobile-open" : ""}"><header class="chat-title"><button class="glass-back" data-action="messages-back" aria-label="Retour aux conversations">${icon("arrowLeft")}</button><span class="conversation-avatar">${escape(initials(current.other_name))}</span><div><strong>${escape(current.other_name)}</strong><small>${escape(current.request_title || "Discussion")}</small></div></header><div class="message-list">${state.messages.length ? state.messages.map((message) => `<div class="message ${message.sender_id === state.user.id ? "mine" : ""}"><p>${escape(message.body)}</p><small>${escape(message.sender_name)}${message.created_at ? ` · ${escape(formatDate(message.created_at))}` : ""}</small></div>`).join("") : `<div class="empty-state compact">${icon("messages")}<strong>Dites bonjour pour commencer.</strong></div>`}</div><form class="message-form" data-form="message"><input name="body" maxlength="2000" placeholder="Écrire un message" required /><button class="button icon" aria-label="Envoyer">${icon("send")}</button></form></section>`
+    ? `<section class="chat ${state.mobileConversationOpen ? "mobile-open" : ""}"><header class="chat-title"><button class="glass-back" data-action="messages-back" aria-label="Retour aux conversations">${icon("arrowLeft")}</button>${current.other_avatar_url ? `<img class="conversation-avatar image" src="${escape(current.other_avatar_url)}" alt="" />` : `<span class="conversation-avatar">${escape(initials(current.other_name))}</span>`}<div><strong>${escape(current.other_name)}</strong><small>${escape(current.request_title || "Discussion")}</small></div>${current.request_status === "assigned" ? `<button class="text-button complete-service" data-action="complete-service" data-id="${current.request_id}">${icon("check")} Terminer</button>` : current.request_status === "completed" ? `<button class="text-button complete-service" data-action="open-review" data-id="${current.request_id}">${icon("star")} Évaluer</button>` : ""}</header><div class="message-list">${state.messages.length ? state.messages.map((message) => `<div class="message ${message.sender_id === state.user.id ? "mine" : ""}">${messageContent(message)}<small>${escape(message.sender_name)}${message.created_at ? ` · ${escape(formatDate(message.created_at))}` : ""}</small></div>`).join("") : `<div class="empty-state compact">${icon("messages")}<strong>Dites bonjour pour commencer.</strong></div>`}</div><form class="message-form enriched" data-form="message">${messageDraftPreview()}<div class="message-tools"><label class="message-tool" aria-label="Ajouter une image ou une vidéo">${icon("paperclip")}<input type="file" name="attachment" accept="image/jpeg,image/png,image/webp,video/mp4,video/webm" data-action="message-file" /></label><button type="button" class="message-tool ${state.voiceRecorder ? "recording" : ""}" data-action="toggle-recording" aria-label="${state.voiceRecorder ? "Arrêter l'enregistrement" : "Enregistrer un message vocal"}">${icon(state.voiceRecorder ? "stop" : "mic")}</button><button type="button" class="message-tool" data-action="share-message-location" aria-label="Partager ma localisation">${icon("location")}</button></div><input name="body" maxlength="2000" placeholder="Écrire un message" /><button class="button icon send-message" aria-label="Envoyer">${icon("send")}</button></form></section>`
     : `<section class="chat"><div class="empty-state">${icon("messages")}<strong>Choisissez une conversation</strong><p>Sélectionnez un échange dans la liste.</p></div></section>`;
   return `<main id="main-content" class="view-page member-page messages-page connection-surface" tabindex="-1"><div class="page-heading"><p class="eyebrow">Messages</p><h1>Vos discussions</h1><p class="page-lead">Retrouvez simplement les personnes avec qui vous êtes en contact.</p></div><div class="panel messages-layout ${state.mobileConversationOpen ? "show-conversation" : ""}"><aside class="conversation-list">${list}</aside>${chat}</div></main>`;
 }
 function profileView() {
   const user = state.user;
+  const prefs = parseDashboardPrefs(user.dashboard_prefs);
   const requestItems = state.mine.requests.length
     ? state.mine.requests
         .map(
@@ -420,13 +530,22 @@ function profileView() {
         )
         .join("")
     : "<li>Aucun service proposé.</li>";
+  const repliedItems = state.activity.replied.length
+    ? state.activity.replied.map((item) => `<li><strong>${escape(item.title)}</strong> <small>${escape(translate(state.locale, item.status))}</small>${item.status === "assigned" ? `<button class="text-button" data-action="complete-service" data-id="${item.id}">Marquer comme terminé</button>` : item.status === "completed" ? `<button class="text-button" data-action="open-review" data-id="${item.id}">Évaluer</button>` : ""}</li>`).join("")
+    : "<li>Aucun service rejoint.</li>";
+  const receivedReviews = state.activity.reviews.length
+    ? state.activity.reviews.map((review) => `<li class="received-review"><strong>${"★".repeat(Number(review.rating))}${"☆".repeat(5 - Number(review.rating))}</strong><span>${escape(review.request_title)}</span>${review.comment ? `<p>${escape(review.comment)}</p>` : ""}<small>${escape(review.reviewer_name)} · ${escape(formatDate(review.created_at))}</small></li>`).join("")
+    : "<li>Aucune évaluation publiée.</li>";
   const admin = user.is_admin
     ? `<section class="panel profile-box"><h3>Administration</h3><p>${state.adminStats ? `${state.adminStats.users} ${translate(state.locale, "comptes")}<br>${state.adminStats.open_requests} ${translate(state.locale, "demandes ouvertes")}<br>${state.adminStats.active_services} ${translate(state.locale, "services visibles")}` : "Chargement des statistiques…"}</p></section>`
     : "";
   const activeRequests = state.mine.requests.filter((item) => item.status === "open" || item.status === "assigned").length;
   const completedRequests = state.mine.requests.filter((item) => item.status === "completed").length;
   const visibleServices = state.mine.services.filter((item) => item.available).length;
-  return `<main id="main-content" class="view-page member-page profile-page connection-surface" tabindex="-1"><div class="page-heading profile-heading"><div><p class="eyebrow">Tableau de bord</p><h1>Votre espace ServiceGO</h1><p class="page-lead">Votre compte, vos activités et vos échanges au même endroit.</p></div><button class="nucleus-icon profile-settings" data-action="open-settings" aria-label="Paramètres" data-label="Paramètres">${icon("settings")}</button></div><div class="dashboard-sections"><section class="dashboard-section"><header><span>${icon("user")}</span><div><p class="eyebrow">Mon compte</p><h2>Identité et préférences</h2></div></header><article class="panel account-card"><div class="avatar">${escape(initials(user.full_name))}</div><div class="account-copy"><h3>${escape(user.full_name)}</h3><p>${escape(user.email)} · ${escape(user.district)}</p>${user.email_verified ? `<small>Adresse e-mail confirmée</small>` : `<small>Adresse e-mail à confirmer</small>`}</div><div class="profile-actions"><button class="button secondary" data-action="open-profile">Modifier</button><button class="button outline" data-action="logout">Se déconnecter</button></div></article></section><section class="dashboard-section"><header><span>${icon("activity")}</span><div><p class="eyebrow">Mon activité</p><h2>Demandes et services</h2></div></header><div class="dashboard-grid"><article class="panel dashboard-card"><h3>Mes demandes</h3><ul class="profile-list">${requestItems}</ul></article><article class="panel dashboard-card"><h3>Mes offres de service</h3><ul class="profile-list">${serviceItems}</ul></article></div></section><section class="dashboard-section"><header><span>${icon("messages")}</span><div><p class="eyebrow">Mes échanges</p><h2>Conversations</h2></div></header><article class="panel exchange-card"><div><strong>${state.conversations.length}</strong><span>${state.conversations.length > 1 ? "conversations" : "conversation"}</span></div><button class="button secondary" data-action="view" data-view="messages">Ouvrir mes messages</button></article></section><section class="dashboard-section"><header><span>${icon("clock")}</span><div><p class="eyebrow">Mon suivi</p><h2>Indicateurs réels</h2></div></header><div class="tracking-grid"><article class="panel"><strong>${activeRequests}</strong><span>Demandes actives</span></article><article class="panel"><strong>${completedRequests}</strong><span>Demandes terminées</span></article><article class="panel"><strong>${visibleServices}</strong><span>Services visibles</span></article><article class="panel"><strong>${state.conversations.length}</strong><span>Échanges</span></article></div></section>${admin}</div></main>`;
+  const activitySection = prefs.activity ? `<section class="dashboard-section"><header><span>${icon("activity")}</span><div><p class="eyebrow">Mon activité</p><h2>Demandes et services</h2></div></header><div class="dashboard-grid"><article class="panel dashboard-card"><h3>Mes demandes</h3><ul class="profile-list">${requestItems}</ul></article><article class="panel dashboard-card"><h3>Services auxquels j'ai répondu</h3><ul class="profile-list">${repliedItems}</ul></article><article class="panel dashboard-card"><h3>Mes offres de service</h3><ul class="profile-list">${serviceItems}</ul></article></div></section>` : "";
+  const exchangesSection = prefs.exchanges ? `<section class="dashboard-section"><header><span>${icon("messages")}</span><div><p class="eyebrow">Mes échanges</p><h2>Conversations</h2></div></header><article class="panel exchange-card"><div><strong>${state.conversations.length}</strong><span>${state.conversations.length > 1 ? "conversations" : "conversation"}</span></div><button class="button secondary" data-action="view" data-view="messages">Ouvrir mes messages</button></article></section>` : "";
+  const trackingSection = prefs.tracking ? `<section class="dashboard-section"><header><span>${icon("clock")}</span><div><p class="eyebrow">Mon suivi</p><h2>Indicateurs réels</h2></div></header><div class="tracking-grid"><article class="panel"><strong>${activeRequests}</strong><span>Demandes actives</span></article><article class="panel"><strong>${completedRequests}</strong><span>Demandes terminées</span></article><article class="panel"><strong>${visibleServices}</strong><span>Services visibles</span></article><article class="panel"><strong>${Number(user.rating || 0).toFixed(1)}</strong><span>${user.review_count || 0} avis</span></article></div><article class="panel dashboard-card reviews-card"><h3>Évaluations reçues</h3><ul class="profile-list">${receivedReviews}</ul></article></section>` : "";
+  return `<main id="main-content" class="view-page member-page profile-page connection-surface" tabindex="-1"><div class="profile-cover" ${user.cover_url ? `style="background-image:url('${escape(user.cover_url)}')"` : ""}></div><div class="page-heading profile-heading"><div><p class="eyebrow">Tableau de bord</p><h1>Votre espace ServiceGO</h1><p class="page-lead">Votre compte, vos activités et vos échanges au même endroit.</p></div><button class="nucleus-icon profile-settings" data-action="open-settings" aria-label="Paramètres" data-label="Paramètres">${icon("settings")}</button></div><div class="dashboard-sections"><section class="dashboard-section"><header><span>${icon("user")}</span><div><p class="eyebrow">Mon compte</p><h2>Identité et préférences</h2></div></header><article class="panel account-card">${user.avatar_url ? `<img class="avatar profile-photo" src="${escape(user.avatar_url)}" alt="Photo de profil" />` : `<div class="avatar">${escape(initials(user.full_name))}</div>`}<div class="account-copy"><h3>${escape(user.full_name)}</h3><p>${escape(user.email)} · ${escape(user.district)}</p>${user.email_verified ? `<small>Adresse e-mail confirmée</small>` : `<small>Adresse e-mail à confirmer</small>`}</div><div class="profile-actions"><button class="button secondary" data-action="open-profile">Personnaliser</button><button class="button outline" data-action="logout">Se déconnecter</button></div></article></section>${activitySection}${exchangesSection}${trackingSection}${admin}</div></main>`;
 }
 function adminView() {
   const stats = state.adminStats || {};
@@ -441,10 +560,13 @@ function authModal() {
   return `<div class="modal-layer"><section class="modal public-modal auth-modal"><button class="button icon outline close" data-action="close-modal" aria-label="Fermer">×</button><p class="eyebrow">ServiceGO</p><h2>${register ? "Créez votre compte" : "Bon retour"}</h2><div class="modal-tabs"><button class="${register ? "active" : ""}" data-action="auth-tab" data-mode="register">Créer un compte</button><button class="${!register ? "active" : ""}" data-action="auth-tab" data-mode="login">Se connecter</button></div><form class="form-grid" data-form="auth">${register ? `<label class="field"><span>Prénom</span><input name="first_name" autocomplete="given-name" minlength="1" maxlength="40" placeholder="Votre prénom" required /></label><label class="field"><span>Nom</span><input name="last_name" autocomplete="family-name" minlength="1" maxlength="40" placeholder="Votre nom" required /></label>` : ""}<label class="field full"><span>E-mail</span><input name="email" type="email" autocomplete="email" placeholder="nom@exemple.com" required /></label>${register ? `<div class="phone-field full"><label class="field dial-code"><span>Indicatif</span><select name="dial_code" aria-label="Indicatif international">${codes.map(([iso,code])=>`<option value="${code}" ${iso===country?"selected":""}>${iso} ${code}</option>`).join("")}</select></label><label class="field phone-number"><span>Téléphone</span><input name="phone_number" maxlength="24" inputmode="tel" autocomplete="tel-national" placeholder="6 12 34 56 78" required /></label></div>` : ""}<label class="field full password-field"><span>Mot de passe</span><span class="password-input"><input name="password" type="${state.passwordVisible ? "text" : "password"}" autocomplete="${register ? "new-password" : "current-password"}" minlength="8" placeholder="8 caractères minimum" required /><button type="button" data-action="toggle-password" aria-label="${state.passwordVisible ? "Masquer le mot de passe" : "Afficher le mot de passe"}">${state.passwordVisible ? "◉" : "○"}</button></span></label>${!register ? `<button type="button" class="text-button forgot-link" data-action="auth-tab" data-mode="forgot">Mot de passe oublié ?</button>` : ""}<button class="button submit" type="submit">${register ? "Créer mon compte" : "Se connecter"}</button></form><p class="form-note">Un seul compte pour demander un service et proposer votre aide.</p></section></div>`;
 }
 function requestModal() {
-  return `<div class="modal-layer"><section class="modal"><button class="button icon outline close" data-action="close-modal" aria-label="Fermer">×</button><p class="eyebrow">Demander</p><h2>Quel besoin avez-vous ?</h2><form class="form-grid" data-form="request"><label class="field"><span>Service</span><select name="category_id" required>${categoryOptions()}</select></label><label class="field"><span>Ville</span><select name="district">${cityOptions()}</select></label><label class="field full"><span>Titre court</span><input name="title" maxlength="100" placeholder="Ex. : fuite sous l'évier" required /></label><label class="field full"><span>Expliquez simplement</span><textarea name="description" maxlength="1200" placeholder="Décrivez ce qui doit être fait et précisez quand." required></textarea></label><label class="field"><span>Budget (facultatif)</span><input name="budget_hint" maxlength="80" placeholder="Ex. : 150 à 250 DH" /></label><label class="field"><span>Urgence</span><select name="urgency"><option value="normal">Normale</option><option value="urgent">Urgente</option></select></label><label class="field full"><span>Photo (facultative)</span><input type="file" name="photo" accept="image/*" /></label><button class="button submit" type="submit">Publier sur la carte</button></form></section></div>`;
+  const fallback = coordsFromCity(state.user?.district);
+  const point = state.selectedMapPoint || fallback;
+  return `<div class="modal-layer"><section class="modal request-create-modal"><button class="button icon outline close" data-action="close-modal" aria-label="Fermer">×</button><p class="eyebrow">Demander</p><h2>Quel besoin avez-vous ?</h2><form class="form-grid" data-form="request"><input type="hidden" name="latitude" value="${point.latitude}" /><input type="hidden" name="longitude" value="${point.longitude}" /><label class="field"><span>Service</span><select name="category_id" required>${categoryOptions()}</select></label><label class="field"><span>Lieu public approximatif</span><input name="district" value="${escape(state.user?.district || "")}" maxlength="80" placeholder="Ville ou quartier" required /></label><div class="field full location-choice"><span>${icon("location")} ${Number(point.latitude).toFixed(4)}, ${Number(point.longitude).toFixed(4)}</span><button type="button" class="text-button" data-action="adjust-request-location">Ajuster sur la carte</button></div><label class="privacy-choice full"><input type="checkbox" name="approximate" checked /><span>Publier une position approximative pour protéger l'adresse exacte.</span></label><p class="form-note full">La carte publique réduit volontairement la précision. Évitez de placer le point directement sur une porte privée.</p><label class="field full"><span>Titre court</span><input name="title" maxlength="100" placeholder="Ex. : fuite sous l'évier" required /></label><label class="field full"><span>Expliquez simplement</span><textarea name="description" maxlength="1200" placeholder="Décrivez ce qui doit être fait et précisez quand." required></textarea></label><label class="field"><span>Budget (facultatif)</span><input name="budget_hint" maxlength="80" placeholder="Ex. : 150 à 250 DH" /></label><label class="field"><span>Urgence</span><select name="urgency"><option value="normal">Normale</option><option value="urgent">Urgente</option></select></label><label class="field full"><span>Photo (facultative)</span><input type="file" name="photo" accept="image/jpeg,image/png,image/webp" /></label><button class="button submit" type="submit">Publier sur la carte</button></form></section></div>`;
 }
 function serviceModal() {
-  return `<div class="modal-layer"><section class="modal"><button class="button icon outline close" data-action="close-modal" aria-label="Fermer">×</button><p class="eyebrow">Proposer</p><h2>Quel service proposez-vous ?</h2><form class="form-grid" data-form="service"><label class="field"><span>Service</span><select name="category_id" required>${categoryOptions()}</select></label><label class="field"><span>Ville</span><select name="district">${cityOptions()}</select></label><label class="field full"><span>Titre court</span><input name="title" maxlength="100" placeholder="Ex. : peinture d'appartements" required /></label><label class="field full"><span>Expliquez votre service</span><textarea name="description" maxlength="1200" placeholder="Décrivez votre savoir-faire et vos disponibilités." required></textarea></label><label class="field full"><span>Prix indicatif (facultatif)</span><input name="price_hint" maxlength="80" placeholder="Ex. : à partir de 200 DH" /></label><button class="button green submit" type="submit">Me rendre visible</button></form></section></div>`;
+  const point = currentMapPoint(state.user?.district);
+  return `<div class="modal-layer"><section class="modal"><button class="button icon outline close" data-action="close-modal" aria-label="Fermer">×</button><p class="eyebrow">Proposer</p><h2>Quel service proposez-vous ?</h2><form class="form-grid" data-form="service"><input type="hidden" name="latitude" value="${point.latitude}" /><input type="hidden" name="longitude" value="${point.longitude}" /><label class="field"><span>Service</span><select name="category_id" required>${categoryOptions()}</select></label><label class="field"><span>Ville ou quartier</span><input name="district" value="${escape(state.user?.district || "")}" maxlength="80" required /></label><label class="field full"><span>Titre court</span><input name="title" maxlength="100" placeholder="Ex. : peinture d'appartements" required /></label><label class="field full"><span>Expliquez votre service</span><textarea name="description" maxlength="1200" placeholder="Décrivez votre savoir-faire et vos disponibilités." required></textarea></label><label class="field full"><span>Prix indicatif (facultatif)</span><input name="price_hint" maxlength="80" placeholder="Ex. : à partir de 200 DH" /></label><button class="button green submit" type="submit">Me rendre visible</button></form></section></div>`;
 }
 function replyModal() {
   const item = state.selected?.item;
@@ -452,14 +574,19 @@ function replyModal() {
 }
 function directModal() {
   const item = state.selected?.item;
-  return `<div class="modal-layer"><section class="modal"><button class="button icon outline close" data-action="close-modal" aria-label="Fermer">×</button><p class="eyebrow">${translate(state.locale, "Demander à")} ${escape(item?.full_name)}</p><h2>${escape(item?.title)}</h2><form class="form-grid" data-form="direct"><input type="hidden" name="service_id" value="${escape(item?.id)}" /><label class="field"><span>Ville</span><select name="district">${cityOptions()}</select></label><label class="field"><span>Urgence</span><select name="urgency"><option value="normal">Normale</option><option value="urgent">Urgente</option></select></label><label class="field full"><span>Votre besoin</span><textarea name="description" maxlength="1200" placeholder="Bonjour, j'ai besoin de votre service…" required></textarea></label><label class="field full"><span>Budget (facultatif)</span><input name="budget_hint" maxlength="80" placeholder="Ex. : 300 DH" /></label><button class="button green submit" type="submit">Envoyer directement</button></form></section></div>`;
+  const point = currentMapPoint(state.user?.district);
+  return `<div class="modal-layer"><section class="modal"><button class="button icon outline close" data-action="close-modal" aria-label="Fermer">×</button><p class="eyebrow">${translate(state.locale, "Demander à")} ${escape(item?.full_name)}</p><h2>${escape(item?.title)}</h2><form class="form-grid" data-form="direct"><input type="hidden" name="service_id" value="${escape(item?.id)}" /><input type="hidden" name="latitude" value="${point.latitude}" /><input type="hidden" name="longitude" value="${point.longitude}" /><label class="field"><span>Ville ou quartier</span><input name="district" value="${escape(state.user?.district || "")}" maxlength="80" required /></label><label class="field"><span>Urgence</span><select name="urgency"><option value="normal">Normale</option><option value="urgent">Urgente</option></select></label><label class="field full"><span>Votre besoin</span><textarea name="description" maxlength="1200" placeholder="Bonjour, j'ai besoin de votre service…" required></textarea></label><label class="field full"><span>Budget (facultatif)</span><input name="budget_hint" maxlength="80" placeholder="Ex. : 300 DH" /></label><button class="button green submit" type="submit">Envoyer directement</button></form></section></div>`;
 }
 function profileModal() {
   const user = state.user;
-  return `<div class="modal-layer"><section class="modal"><button class="button icon outline close" data-action="close-modal" aria-label="Fermer">×</button><p class="eyebrow">Profil</p><h2>Vos informations</h2><form class="form-grid" data-form="profile"><label class="field full"><span>Prénom et nom</span><input name="full_name" value="${escape(user.full_name)}" maxlength="80" required /></label><label class="field"><span>Téléphone</span><input name="phone" value="${escape(user.phone || "")}" maxlength="30" /></label><label class="field"><span>Ville</span><select name="district">${cityOptions(user.district)}</select></label><label class="field full"><span>Quelques mots sur vous</span><textarea name="bio" maxlength="500">${escape(user.bio || "")}</textarea></label><label class="field full"><span>Nouvelle adresse e-mail</span><input name="new_email" type="email" autocomplete="email" placeholder="${translate(state.locale, "Laissez ce champ vide pour conserver")} ${escape(user.email)}" /></label><label class="field"><span>Mot de passe actuel</span><input name="current_password" type="password" autocomplete="current-password" /></label><label class="field"><span>Nouveau mot de passe</span><input name="new_password" type="password" minlength="8" autocomplete="new-password" /></label><button class="button submit" type="submit">Enregistrer</button></form></section></div>`;
+  const prefs = parseDashboardPrefs(user.dashboard_prefs);
+  return `<div class="modal-layer"><section class="modal profile-editor"><button class="button icon outline close" data-action="close-modal" aria-label="Fermer">×</button><p class="eyebrow">Profil</p><h2>Personnaliser mon espace</h2><form class="form-grid" data-form="profile"><section class="profile-privacy full"><h3>Profil public</h3><p>La photo, le prénom, la biographie et les évaluations peuvent être visibles aux autres membres. L'e-mail et le téléphone restent privés.</p></section><label class="field"><span>Prénom</span><input name="first_name" value="${escape(user.first_name || user.full_name?.split(" ")[0] || "")}" maxlength="40" required /></label><label class="field"><span>Nom</span><input name="last_name" value="${escape(user.last_name || user.full_name?.split(" ").slice(1).join(" ") || "")}" maxlength="40" required /></label><label class="field"><span>Photo de profil</span><input type="file" name="avatar" accept="image/jpeg,image/png,image/webp" /></label><label class="field"><span>Image de couverture</span><input type="file" name="cover" accept="image/jpeg,image/png,image/webp" /></label><label class="field"><span>Téléphone privé</span><input name="phone" value="${escape(user.phone || "")}" maxlength="30" /></label><label class="field"><span>Ville publique approximative</span><input name="district" value="${escape(user.district || "")}" maxlength="80" /></label><label class="field full"><span>Quelques mots sur vous</span><textarea name="bio" maxlength="500">${escape(user.bio || "")}</textarea></label><fieldset class="dashboard-preferences full"><legend>Sections du tableau de bord</legend><label><input type="checkbox" name="show_activity" ${prefs.activity ? "checked" : ""} /> Mon activité</label><label><input type="checkbox" name="show_exchanges" ${prefs.exchanges ? "checked" : ""} /> Mes échanges</label><label><input type="checkbox" name="show_tracking" ${prefs.tracking ? "checked" : ""} /> Mon suivi</label></fieldset><section class="profile-privacy full"><h3>Informations privées</h3></section><label class="field full"><span>Nouvelle adresse e-mail</span><input name="new_email" type="email" autocomplete="email" placeholder="${translate(state.locale, "Laissez ce champ vide pour conserver")} ${escape(user.email)}" /></label><label class="field"><span>Mot de passe actuel</span><input name="current_password" type="password" autocomplete="current-password" /></label><label class="field"><span>Nouveau mot de passe</span><input name="new_password" type="password" minlength="8" autocomplete="new-password" /></label><button class="button submit" type="submit">Enregistrer</button></form></section></div>`;
 }
 function settingsModal() {
   return `<div class="modal-layer"><section class="modal public-modal settings-modal"><button class="button icon outline close" data-action="close-modal" aria-label="Fermer">×</button><p class="eyebrow">ServiceGO</p><h2>Paramètres</h2><section class="settings-section"><h3>Langue</h3><div class="settings-languages" role="group" aria-label="Langue"><button class="${state.locale === "fr" ? "active" : ""}" data-action="set-locale" data-locale="fr">Français</button><button class="${state.locale === "en" ? "active" : ""}" data-action="set-locale" data-locale="en">English</button><button class="${state.locale === "ar" ? "active" : ""}" data-action="set-locale" data-locale="ar">العربية</button></div></section><section class="settings-section"><h3>Compte</h3><button class="button secondary" data-action="open-profile">Modifier mes informations</button></section></section></div>`;
+}
+function reviewModal() {
+  return `<div class="modal-layer"><section class="modal review-modal"><button class="button icon outline close" data-action="close-modal" aria-label="Fermer">×</button><p class="eyebrow">Évaluation mutuelle</p><h2>Comment s'est passé le service ?</h2><p class="modal-intro">Votre avis sera publié lorsque l'autre personne aura évalué, ou dans sept jours.</p><form class="form-grid" data-form="review"><input type="hidden" name="request_id" value="${escape(state.reviewRequestId)}" /><fieldset class="rating-field full"><legend>Note de 1 à 5 étoiles</legend>${[1,2,3,4,5].map((value)=>`<label><input type="radio" name="rating" value="${value}" required /><span>${icon("star")}</span><b>${value}</b></label>`).join("")}</fieldset><label class="field full"><span>Commentaire facultatif</span><textarea name="comment" maxlength="500" placeholder="Décrivez votre expérience sans partager d'informations personnelles."></textarea></label><button class="button submit" type="submit">Enregistrer mon évaluation</button></form></section></div>`;
 }
 function offersModal() {
   const request = state.offers.request;
@@ -499,6 +626,7 @@ function modal() {
   if (state.modal === "direct") return directModal();
   if (state.modal === "profile") return profileModal();
   if (state.modal === "settings") return settingsModal();
+  if (state.modal === "review") return reviewModal();
   if (state.modal === "offers") return offersModal();
   if (state.modal === "quick") return quickModal();
   if (state.modal === "info") return infoModal();
@@ -537,6 +665,7 @@ function render() {
 }
 function closeModal() {
   if (state.modal === "auth") state.pendingIntent = null;
+  if (state.modal === "request") state.selectedMapPoint = null;
   state.modal = null;
 }
 function initializeStory() {
@@ -547,13 +676,13 @@ function initializeStory() {
     marketingMap = Leaflet.map(mapElement, { center: [lat, lng], zoom, zoomControl: false, attributionControl: false, dragging: false, scrollWheelZoom: false, doubleClickZoom: false, keyboard: false, touchZoom: false });
     Leaflet.tileLayer(state.config.mapTileUrl, { attribution: state.config.mapAttribution, maxZoom: 18 }).addTo(marketingMap);
     const previewMarkers = [
-      { position: cities.Rabat, label: "Fuite", kind: "need", urgent: true },
-      { position: cities.Casablanca, label: "Peinture", kind: "help" },
-      { position: cities.Fes, label: "Livraison", kind: "need" },
-      { position: cities.Marrakech, label: "Ménage", kind: "help" },
+      { position: cities.Rabat, label: "Fuite", category: "W", kind: "need", urgent: true },
+      { position: cities.Casablanca, label: "Peinture", category: "P", kind: "help" },
+      { position: cities.Fes, label: "Livraison", category: "L", kind: "need" },
+      { position: cities.Marrakech, label: "Ménage", category: "M", kind: "help" },
     ];
     for (const marker of previewMarkers) {
-      const markerIcon = Leaflet.divIcon({ className: "marketing-marker", html: `<span class="map-bubble ${marker.kind} ${marker.urgent ? "urgent" : ""}">${translate(state.locale, marker.label)}</span>`, iconSize: [88, 46], iconAnchor: [44, 38] });
+      const markerIcon = Leaflet.divIcon({ className: "marketing-marker", html: `<span class="premium-map-pin with-label ${marker.kind} ${marker.urgent ? "urgent" : ""}"><span class="pin-category">${marker.category}</span><span class="pin-copy"><b>${translate(state.locale, marker.label)}</b><small>${translate(state.locale, marker.kind === "need" ? "Demande" : "Service disponible")}</small></span></span>`, iconSize: [132, 50], iconAnchor: [24, 42] });
       Leaflet.marker(marker.position, { icon: markerIcon, interactive: false }).addTo(marketingMap);
     }
   }
@@ -639,11 +768,15 @@ async function loadConversations(selectFirst = false) {
     state.messages = messages.messages;
   }
 }
+async function loadActivity() {
+  const data = await api("/api/activity");
+  state.activity = { replied: data.replied || [], reviews: data.reviews || [] };
+}
 async function prepareView(view) {
   if (view === "map") await loadMap();
   if (view === "messages") await loadConversations(true);
   if (view === "profile") {
-    await Promise.all([loadMine(), loadConversations(false)]);
+    await Promise.all([loadMine(), loadConversations(false), loadActivity()]);
     if (state.user?.is_admin) state.adminStats = (await api("/api/admin/overview")).stats;
   }
   if (view === "admin" && state.user?.is_admin) state.adminStats = (await api("/api/admin/overview")).stats;
@@ -656,6 +789,7 @@ async function navigateToView(view, { replace = false, renderNow = true } = {}) 
   await prepareView(target);
   const method = replace ? "replaceState" : "pushState";
   window.history[method]({ view: target }, "", routeForView[target]);
+  window.scrollTo({ top: 0, left: 0, behavior: "auto" });
   if (renderNow) render();
 }
 async function start() {
@@ -804,8 +938,23 @@ app.addEventListener("click", async (event) => {
       }
     }
     if (action === "open-request") {
+      if (!state.selectedMapPoint && leafletMap) {
+        const center = leafletMap.getCenter();
+        state.selectedMapPoint = { latitude: center.lat, longitude: center.lng };
+      }
       state.modal = "request";
       render();
+    }
+    if (action === "map-create-center") {
+      const center = leafletMap?.getCenter() || { lat: 20, lng: 0 };
+      state.selectedMapPoint = { latitude: Number(center.lat.toFixed(6)), longitude: Number(center.lng.toFixed(6)) };
+      state.modal = "request";
+      render();
+    }
+    if (action === "adjust-request-location") {
+      state.modal = null;
+      render();
+      notify("Maintenez appuyé sur le nouvel emplacement.");
     }
     if (action === "locate-me") locateUser();
     if (action === "open-service") {
@@ -822,6 +971,17 @@ app.addEventListener("click", async (event) => {
     }
     if (action === "open-profile") {
       state.modal = "profile";
+      render();
+    }
+    if (action === "complete-service") {
+      const data = await api(`/api/requests/${button.dataset.id}/complete`, { method: "POST" });
+      await Promise.all([loadConversations(false), loadMine(), loadActivity()]);
+      render();
+      notify(data.message);
+    }
+    if (action === "open-review") {
+      state.reviewRequestId = button.dataset.id;
+      state.modal = "review";
       render();
     }
     if (action === "open-settings") {
@@ -897,6 +1057,41 @@ app.addEventListener("click", async (event) => {
         render();
       }
     }
+    if (action === "clear-message-attachment") {
+      if (state.messageAttachment?.url?.startsWith("blob:")) URL.revokeObjectURL(state.messageAttachment.url);
+      state.messageAttachment = null;
+      render();
+    }
+    if (action === "share-message-location") {
+      if (!navigator.geolocation) throw new Error("La localisation n'est pas disponible sur cet appareil.");
+      navigator.geolocation.getCurrentPosition(({ coords }) => {
+        state.messageAttachment = { type: "location", latitude: coords.latitude, longitude: coords.longitude };
+        render();
+      }, () => notify("Localisation refusée. Aucun emplacement n'a été partagé.", true), { enableHighAccuracy: false, timeout: 10000, maximumAge: 60000 });
+    }
+    if (action === "toggle-recording") {
+      if (state.voiceRecorder) {
+        state.voiceRecorder.recorder.stop();
+        state.voiceRecorder.stream.getTracks().forEach((track) => track.stop());
+        state.voiceRecorder = null;
+        return;
+      }
+      if (!navigator.mediaDevices?.getUserMedia || !window.MediaRecorder) throw new Error("L'enregistrement vocal n'est pas disponible sur cet appareil.");
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const recorder = new MediaRecorder(stream, { mimeType: MediaRecorder.isTypeSupported("audio/webm") ? "audio/webm" : undefined });
+      state.voiceChunks = [];
+      recorder.addEventListener("dataavailable", (voiceEvent) => { if (voiceEvent.data.size) state.voiceChunks.push(voiceEvent.data); });
+      recorder.addEventListener("stop", () => {
+        const mimeType = recorder.mimeType || "audio/webm";
+        const blob = new Blob(state.voiceChunks, { type: mimeType });
+        state.messageAttachment = { type: "audio", file: new File([blob], `vocal-${Date.now()}.webm`, { type: mimeType }), url: URL.createObjectURL(blob) };
+        state.voiceChunks = [];
+        render();
+      });
+      recorder.start();
+      state.voiceRecorder = { recorder, stream };
+      render();
+    }
     if (action === "logout") {
       await api("/api/auth/logout", { method: "POST" });
       state.user = null;
@@ -916,6 +1111,15 @@ app.addEventListener("click", async (event) => {
 });
 app.addEventListener("change", (event) => {
   const target = event.target;
+  if (target.matches('[data-action="message-file"]') && target.files?.[0]) {
+    const file = target.files[0];
+    const type = file.type.startsWith("image/") ? "image" : file.type.startsWith("video/") ? "video" : null;
+    if (!type) return notify("Ce format de fichier n'est pas accepté.", true);
+    if (state.messageAttachment?.url?.startsWith("blob:")) URL.revokeObjectURL(state.messageAttachment.url);
+    state.messageAttachment = { type, file, url: URL.createObjectURL(file) };
+    render();
+    return;
+  }
   if (target.matches('[data-action="locale"]')) {
     state.locale = target.value;
     localStorage.setItem("servicego-locale", state.locale);
@@ -1000,11 +1204,17 @@ app.addEventListener("submit", async (event) => {
         method: "POST",
         body: JSON.stringify(values),
       });
+      const intent = state.pendingIntent;
       state.user = data.user;
       state.pendingIntent = null;
       state.pendingRoute = null;
       state.modal = null;
       await navigateToView("map", { replace: true });
+      if (intent === "request") {
+        state.selectedMapPoint = leafletMap ? (() => { const center = leafletMap.getCenter(); return { latitude: center.lat, longitude: center.lng }; })() : coordsFromCity(state.user.district);
+        state.modal = "request";
+        render();
+      }
       notify(
         state.authMode === "register"
           ? data.email_delivery_configured
@@ -1020,37 +1230,35 @@ app.addEventListener("submit", async (event) => {
       render();
     }
     if (type === "request") {
-      const city = String(values.district);
-      const coordinates = coordsFromCity(city);
+      const approximate = values.approximate === "on";
+      const coordinates = {
+        latitude: approximate ? Number(Number(values.latitude).toFixed(3)) : Number(values.latitude),
+        longitude: approximate ? Number(Number(values.longitude).toFixed(3)) : Number(values.longitude),
+      };
+      delete values.approximate;
       const photo = form.querySelector('input[name="photo"]');
       if (photo?.files?.[0]) {
-        const upload = new FormData();
-        upload.append("file", photo.files[0]);
-        const response = await fetch("/api/uploads", {
-          method: "POST",
-          credentials: "same-origin",
-          body: upload,
-        });
-        const uploaded = await response.json();
-        if (!response.ok)
-          throw new Error(uploaded.error || "Impossible d'envoyer la photo.");
+        const uploaded = await uploadFile(photo.files[0], "request");
         values.photo_key = uploaded.key;
       }
-      await api("/api/requests", {
+      delete values.photo;
+      const data = await api("/api/requests", {
         method: "POST",
         body: JSON.stringify({ ...values, ...coordinates }),
       });
       state.modal = null;
       state.view = "map";
       await loadMap();
+      const created = state.map.requests.find((item) => item.id === data.id);
+      if (created) state.selected = { type: "request", item: created };
+      state.selectedMapPoint = null;
       render();
       notify("Votre besoin est maintenant visible.");
     }
     if (type === "service") {
-      const coordinates = coordsFromCity(String(values.district));
       await api("/api/services", {
         method: "POST",
-        body: JSON.stringify({ ...values, ...coordinates }),
+        body: JSON.stringify({ ...values, latitude: Number(values.latitude), longitude: Number(values.longitude) }),
       });
       state.modal = null;
       state.view = "map";
@@ -1059,19 +1267,19 @@ app.addEventListener("submit", async (event) => {
       notify("Votre service est maintenant visible.");
     }
     if (type === "reply") {
-      await api(`/api/requests/${values.request_id}/offers`, {
+      const data = await api(`/api/requests/${values.request_id}/offers`, {
         method: "POST",
         body: JSON.stringify(values),
       });
       state.modal = null;
-      render();
-      notify("Votre réponse a été envoyée.");
+      state.activeConversation = data.conversation_id;
+      await navigateToView("messages");
+      notify("Votre réponse a été envoyée. La discussion est ouverte.");
     }
     if (type === "direct") {
-      const coordinates = coordsFromCity(String(values.district));
       const data = await api(`/api/services/${values.service_id}/request`, {
         method: "POST",
-        body: JSON.stringify({ ...values, ...coordinates }),
+        body: JSON.stringify({ ...values, latitude: Number(values.latitude), longitude: Number(values.longitude) }),
       });
       state.modal = null;
       state.view = "messages";
@@ -1081,6 +1289,19 @@ app.addEventListener("submit", async (event) => {
       notify("Demande envoyée. La discussion est ouverte.");
     }
     if (type === "profile") {
+      const avatar = form.querySelector('input[name="avatar"]')?.files?.[0];
+      const cover = form.querySelector('input[name="cover"]')?.files?.[0];
+      if (avatar) values.avatar_url = (await uploadFile(avatar, "avatar")).url;
+      else values.avatar_url = state.user.avatar_url || "";
+      if (cover) values.cover_url = (await uploadFile(cover, "cover")).url;
+      else values.cover_url = state.user.cover_url || "";
+      values.full_name = `${String(values.first_name || "").trim()} ${String(values.last_name || "").trim()}`.trim();
+      values.dashboard_prefs = { activity: values.show_activity === "on", exchanges: values.show_exchanges === "on", tracking: values.show_tracking === "on" };
+      delete values.avatar;
+      delete values.cover;
+      delete values.show_activity;
+      delete values.show_exchanges;
+      delete values.show_tracking;
       const data = await api("/api/me", {
         method: "PATCH",
         body: JSON.stringify(values),
@@ -1101,12 +1322,33 @@ app.addEventListener("submit", async (event) => {
       notify("Profil enregistré.");
     }
     if (type === "message") {
+      const draft = state.messageAttachment;
+      const payload = { body: String(values.body || ""), message_type: draft?.type || "text" };
+      if (draft?.file) {
+        const uploaded = await uploadFile(draft.file, "message");
+        payload.media_key = uploaded.key;
+        payload.media_mime = draft.file.type;
+      }
+      if (draft?.type === "location") {
+        payload.latitude = draft.latitude;
+        payload.longitude = draft.longitude;
+      }
       await api(`/api/conversations/${state.activeConversation}/messages`, {
         method: "POST",
-        body: JSON.stringify(values),
+        body: JSON.stringify(payload),
       });
+      if (draft?.url?.startsWith("blob:")) URL.revokeObjectURL(draft.url);
+      state.messageAttachment = null;
       await loadConversations();
       render();
+    }
+    if (type === "review") {
+      const data = await api(`/api/requests/${values.request_id}/reviews`, { method: "POST", body: JSON.stringify(values) });
+      state.modal = null;
+      await Promise.all([loadActivity(), loadMine(), loadConversations(false)]);
+      render();
+      window.scrollTo({ top: 0, left: 0, behavior: "auto" });
+      notify(data.message);
     }
   } catch (error) {
     notify(error.message, true);
