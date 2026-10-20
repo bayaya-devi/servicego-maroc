@@ -217,7 +217,7 @@ async function validateLocalizedMemberViews(browser) {
 async function validateUrgentIntent(browser) {
   const registration = await browser.newPage({ viewport: { width: 390, height: 844 } });
   await mockMemberApis(registration);
-  await registration.route("**/api/auth/register", (route) => route.fulfill({ json: { user: testUser, email_delivery_configured: true } }));
+  await registration.route("**/api/auth/register", (route) => route.fulfill({ json: { user: testUser, email_delivery_accepted: true } }));
   await registration.goto(baseUrl, { waitUntil: "networkidle" });
   await registration.locator('[data-action="urgent-request"]').click();
   assert.ok(await registration.locator('input[name="first_name"]').isVisible(), "urgent CTA did not open registration");

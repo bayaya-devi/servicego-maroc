@@ -184,16 +184,68 @@ function escapeHtml(value: string): string {
   return value.replace(/[&<>\"']/g, (character) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[character] ?? character);
 }
 
-async function sendEmail(env: Env, recipient: string, subject: string, html: string): Promise<void> {
+type Locale = "fr" | "en" | "ar";
+type EmailContent = { subject: string; html: string; text: string };
+
+function preferredLocale(request: Request): Locale {
+  const language = request.headers.get("accept-language")?.toLowerCase() ?? "";
+  if (language.includes("ar")) return "ar";
+  if (language.includes("en")) return "en";
+  return "fr";
+}
+
+function transactionalEmail(locale: Locale, kind: "verify_signup" | "verify_email_change" | "reset_password", fullName: string, link: string): EmailContent {
+  const copy = {
+    fr: {
+      verify_signup: ["Confirmez votre compte ServiceGO", "Confirmez votre adresse e-mail", "Merci de confirmer votre adresse pour activer votre compte ServiceGO.", "Confirmer mon adresse", "Ce lien expire dans 24 heures."],
+      verify_email_change: ["Confirmez votre nouvelle adresse ServiceGO", "Confirmez votre nouvelle adresse e-mail", "Confirmez cette adresse pour terminer sa modification sur votre compte ServiceGO.", "Confirmer cette adresse", "Ce lien expire dans 24 heures."],
+      reset_password: ["Réinitialisez votre mot de passe ServiceGO", "Choisissez un nouveau mot de passe", "Une demande de réinitialisation a été reçue pour votre compte ServiceGO.", "Réinitialiser mon mot de passe", "Ce lien expire dans une heure."],
+      greeting: "Bonjour", ignore: "Si vous n’êtes pas à l’origine de cette demande, vous pouvez ignorer cet e-mail.", contact: "Besoin d’aide ? Contactez-nous :", why: "Vous recevez cet e-mail car une action a été demandée sur votre compte ServiceGO.", preheader: "Action requise pour votre compte ServiceGO.",
+    },
+    en: {
+      verify_signup: ["Confirm your ServiceGO account", "Confirm your email address", "Please confirm your email address to activate your ServiceGO account.", "Confirm my email", "This link expires in 24 hours."],
+      verify_email_change: ["Confirm your new ServiceGO email", "Confirm your new email address", "Confirm this address to complete the change on your ServiceGO account.", "Confirm this address", "This link expires in 24 hours."],
+      reset_password: ["Reset your ServiceGO password", "Choose a new password", "A password reset was requested for your ServiceGO account.", "Reset my password", "This link expires in one hour."],
+      greeting: "Hello", ignore: "If you did not request this action, you can safely ignore this email.", contact: "Need help? Contact us:", why: "You are receiving this email because an action was requested on your ServiceGO account.", preheader: "Action required for your ServiceGO account.",
+    },
+    ar: {
+      verify_signup: ["تأكيد حسابك في ServiceGO", "أكّد عنوان بريدك الإلكتروني", "يرجى تأكيد عنوان بريدك الإلكتروني لتفعيل حسابك في ServiceGO.", "تأكيد بريدي الإلكتروني", "تنتهي صلاحية هذا الرابط خلال 24 ساعة."],
+      verify_email_change: ["تأكيد بريدك الإلكتروني الجديد في ServiceGO", "أكّد عنوان بريدك الإلكتروني الجديد", "أكّد هذا العنوان لإتمام تغييره في حسابك على ServiceGO.", "تأكيد هذا العنوان", "تنتهي صلاحية هذا الرابط خلال 24 ساعة."],
+      reset_password: ["إعادة تعيين كلمة مرور ServiceGO", "اختر كلمة مرور جديدة", "تم طلب إعادة تعيين كلمة المرور لحسابك في ServiceGO.", "إعادة تعيين كلمة المرور", "تنتهي صلاحية هذا الرابط خلال ساعة واحدة."],
+      greeting: "مرحبًا", ignore: "إذا لم تطلب هذا الإجراء، يمكنك تجاهل هذه الرسالة بأمان.", contact: "هل تحتاج إلى مساعدة؟ تواصل معنا:", why: "تلقيت هذه الرسالة لأن إجراءً طُلب على حسابك في ServiceGO.", preheader: "إجراء مطلوب لحسابك في ServiceGO.",
+    },
+  } as const;
+  const messages = copy[locale];
+  const [subject, heading, intro, action, expiration] = messages[kind];
+  const direction = locale === "ar" ? "rtl" : "ltr";
+  const safeName = escapeHtml(fullName);
+  const safeLink = escapeHtml(link);
+  const html = `<!doctype html><html lang="${locale}" dir="${direction}"><body style="margin:0;background:#f4f8fb;font-family:Arial,sans-serif;color:#0b2244"><span style="display:none!important;visibility:hidden;opacity:0;color:transparent;height:0;width:0;overflow:hidden">${messages.preheader}</span><table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#f4f8fb;padding:24px 12px"><tr><td align="center"><table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:600px;background:#ffffff;border-radius:12px;overflow:hidden"><tr><td style="padding:26px 32px;background:#2585e6;color:#ffffff"><strong style="font-size:24px">Service<span style="color:#8ee6c9">GO</span></strong><br><span style="font-size:12px">A&amp;B TECHNOLOGIES</span></td></tr><tr><td style="padding:32px;line-height:1.55"><h1 style="margin:0 0 18px;font-size:24px;color:#0b2244">${heading}</h1><p>${messages.greeting} ${safeName},</p><p>${intro}</p><p style="margin:28px 0"><a href="${safeLink}" style="display:inline-block;background:#43c6a5;color:#062b2f;padding:13px 20px;border-radius:6px;font-weight:bold;text-decoration:none">${action}</a></p><p><strong>${expiration}</strong></p><p>${messages.why}</p><p>${messages.ignore}</p><p style="margin-bottom:0">${messages.contact} <a href="mailto:aetbconseil@gmail.com" style="color:#2585e6">aetbconseil@gmail.com</a></p></td></tr></table></td></tr></table></body></html>`;
+  const plainText = `${heading}\n\n${messages.greeting} ${fullName},\n\n${intro}\n\n${action}: ${link}\n\n${expiration}\n\n${messages.why}\n${messages.ignore}\n\n${messages.contact} aetbconseil@gmail.com`;
+  return { subject, html, text: plainText };
+}
+
+function emailIsConfigured(env: Env): boolean {
+  const mailEnv = env as Env & { RESEND_API_KEY?: string; RESEND_FROM_EMAIL?: string };
+  return Boolean(mailEnv.RESEND_API_KEY && mailEnv.RESEND_FROM_EMAIL);
+}
+
+async function sendEmail(env: Env, recipient: string, content: EmailContent): Promise<boolean> {
   const apiKey = (env as Env & { RESEND_API_KEY?: string }).RESEND_API_KEY;
   const from = (env as Env & { RESEND_FROM_EMAIL?: string }).RESEND_FROM_EMAIL;
-  if (!apiKey || !from) return;
-  const response = await fetch("https://api.resend.com/emails", {
-    method: "POST",
-    headers: { authorization: `Bearer ${apiKey}`, "content-type": "application/json" },
-    body: JSON.stringify({ from, to: [recipient], subject, html }),
-  });
-  if (!response.ok) console.warn(JSON.stringify({ event: "resend_failed", status: response.status }));
+  if (!apiKey || !from) return false;
+  try {
+    const response = await fetch("https://api.resend.com/emails", {
+      method: "POST",
+      headers: { authorization: `Bearer ${apiKey}`, "content-type": "application/json" },
+      body: JSON.stringify({ from, to: [recipient], reply_to: "aetbconseil@gmail.com", subject: content.subject, html: content.html, text: content.text }),
+    });
+    if (!response.ok) console.warn(JSON.stringify({ event: "resend_rejected", status: response.status }));
+    return response.ok;
+  } catch {
+    console.warn(JSON.stringify({ event: "resend_unreachable" }));
+    return false;
+  }
 }
 
 async function createEmailVerification(env: Env, userId: string, email: string, purpose: "signup" | "change_email"): Promise<string> {
@@ -209,16 +261,9 @@ async function createEmailVerification(env: Env, userId: string, email: string, 
   return token;
 }
 
-async function sendVerificationEmail(env: Env, email: string, fullName: string, token: string, origin: string, purpose: "signup" | "change_email"): Promise<void> {
+async function sendVerificationEmail(env: Env, email: string, fullName: string, token: string, origin: string, purpose: "signup" | "change_email", locale: Locale): Promise<boolean> {
   const link = `${origin}/api/auth/verify-email?token=${encodeURIComponent(token)}`;
-  const subject = purpose === "signup" ? "Confirmez votre compte ServiceGO" : "Confirmez votre nouvelle adresse ServiceGO";
-  const intro = purpose === "signup" ? "Confirmez votre adresse pour activer votre compte." : "Confirmez cette adresse pour terminer sa modification.";
-  await sendEmail(
-    env,
-    email,
-    subject,
-    `<p>Bonjour ${escapeHtml(fullName)},</p><p>${intro}</p><p><a href="${escapeHtml(link)}">Confirmer mon adresse</a></p><p>Ce lien expire dans 24 heures.</p>`,
-  );
+  return sendEmail(env, email, transactionalEmail(locale, purpose === "signup" ? "verify_signup" : "verify_email_change", fullName, link));
 }
 
 function clientAddress(request: Request): string {
@@ -250,20 +295,21 @@ async function createPasswordReset(env: Env, userId: string): Promise<string> {
   return token;
 }
 
+async function invalidateToken(env: Env, table: "email_verifications" | "password_resets", token: string): Promise<void> {
+  await env.DB.prepare(`UPDATE ${table} SET used_at = CURRENT_TIMESTAMP WHERE token_hash = ? AND used_at IS NULL`)
+    .bind(await tokenHash(token))
+    .run();
+}
+
 async function ownsUpload(env: Env, key: string, userId: string, allowedPurposes: string[]): Promise<boolean> {
   if (!validUploadKey(key, userId) || !env.UPLOADS) return false;
   const object = await env.UPLOADS.getWithMetadata<UploadMetadata>(key, "stream");
   return Boolean(object.value && object.metadata?.userId === userId && allowedPurposes.includes(object.metadata.purpose));
 }
 
-async function sendPasswordResetEmail(env: Env, email: string, fullName: string, token: string, origin: string): Promise<void> {
+async function sendPasswordResetEmail(env: Env, email: string, fullName: string, token: string, origin: string, locale: Locale): Promise<boolean> {
   const link = `${origin}/?reset_token=${encodeURIComponent(token)}`;
-  await sendEmail(
-    env,
-    email,
-    "Réinitialisez votre mot de passe ServiceGO",
-    `<p>Bonjour ${escapeHtml(fullName)},</p><p>Pour choisir un nouveau mot de passe, ouvrez ce lien :</p><p><a href="${escapeHtml(link)}">Réinitialiser mon mot de passe</a></p><p>Ce lien expire dans une heure.</p>`,
-  );
+  return sendEmail(env, email, transactionalEmail(locale, "reset_password", fullName, link));
 }
 
 async function verifyTurnstile(token: string, request: Request, env: Env): Promise<boolean> {
@@ -354,17 +400,17 @@ async function handleAuth(request: Request, env: Env, ctx: ExecutionContext, pat
     if (!(await consumeRateLimit(env, "password_reset", clientAddress(request), 5, 3600))) {
       return json({ error: "Trop de demandes. Réessayez dans une heure." }, 429);
     }
-    const mailEnv = env as Env & { RESEND_API_KEY?: string; RESEND_FROM_EMAIL?: string };
-    if (!mailEnv.RESEND_API_KEY || !mailEnv.RESEND_FROM_EMAIL) {
+    if (!emailIsConfigured(env)) {
       return json({ error: "La récupération par e-mail est temporairement indisponible : le service d'envoi n'est pas configuré." }, 503);
     }
     const account = await env.DB.prepare("SELECT id, email, full_name FROM profiles WHERE email = ? AND is_active = 1")
       .bind(email).first<{ id: string; email: string; full_name: string }>();
     if (account) {
       const token = await createPasswordReset(env, account.id);
-      ctx.waitUntil(sendPasswordResetEmail(env, account.email, account.full_name, token, new URL(request.url).origin));
+      const accepted = await sendPasswordResetEmail(env, account.email, account.full_name, token, new URL(request.url).origin, preferredLocale(request));
+      if (!accepted) await invalidateToken(env, "password_resets", token);
     }
-    return json({ message: "Si cette adresse correspond à un compte, un lien de réinitialisation vient d'être envoyé." }, 202);
+    return json({ message: "Si cette adresse correspond à un compte, ServiceGO traitera la demande de réinitialisation." }, 202);
   }
 
   if (pathname === "/api/auth/reset-password" && request.method === "POST") {
@@ -421,11 +467,12 @@ async function handleAuth(request: Request, env: Env, ctx: ExecutionContext, pat
       .run();
     const sessionId = await createSession(id, env);
     const verificationToken = await createEmailVerification(env, id, email, "signup");
-    ctx.waitUntil(sendVerificationEmail(env, email, fullName, verificationToken, new URL(request.url).origin, "signup"));
+    const emailAccepted = await sendVerificationEmail(env, email, fullName, verificationToken, new URL(request.url).origin, "signup", preferredLocale(request));
+    if (!emailAccepted) await invalidateToken(env, "email_verifications", verificationToken);
     const user = await currentUser(new Request(request.url, { headers: { cookie: `sg_session=${sessionId}` } }), env);
     return json({
       user,
-      email_delivery_configured: Boolean((env as Env & { RESEND_API_KEY?: string; RESEND_FROM_EMAIL?: string }).RESEND_API_KEY && (env as Env & { RESEND_FROM_EMAIL?: string }).RESEND_FROM_EMAIL),
+      email_delivery_accepted: emailAccepted,
     }, 201, { "set-cookie": sessionCookie(sessionId, request) });
   }
 
@@ -547,8 +594,13 @@ async function handleApi(request: Request, env: Env, ctx: ExecutionContext): Pro
     if (exists) return json({ error: "Cette adresse e-mail est déjà utilisée." }, 409);
     const account = await env.DB.prepare("SELECT password_hash FROM profiles WHERE id = ?").bind(user.id).first<{ password_hash: string }>();
     if (!account || !(await passwordMatches(currentPassword, account.password_hash))) return json({ error: "Mot de passe actuel incorrect." }, 401);
+    if (!emailIsConfigured(env)) return json({ error: "La modification d'adresse e-mail est temporairement indisponible : le service d'envoi n'est pas configuré." }, 503);
     const token = await createEmailVerification(env, user.id, nextEmail, "change_email");
-    ctx.waitUntil(sendVerificationEmail(env, nextEmail, user.full_name, token, new URL(request.url).origin, "change_email"));
+    const accepted = await sendVerificationEmail(env, nextEmail, user.full_name, token, new URL(request.url).origin, "change_email", preferredLocale(request));
+    if (!accepted) {
+      await invalidateToken(env, "email_verifications", token);
+      return json({ error: "L'e-mail de confirmation n'a pas pu être envoyé. Réessayez plus tard." }, 503);
+    }
     return json({ message: "Un lien de confirmation a été envoyé à la nouvelle adresse." }, 202);
   }
 
@@ -575,10 +627,13 @@ async function handleApi(request: Request, env: Env, ctx: ExecutionContext): Pro
     const user = await requireUser(request, env);
     if (isResponse(user)) return user;
     if (user.email_verified) return badRequest("Votre adresse est déjà confirmée.");
-    const mailEnv = env as Env & { RESEND_API_KEY?: string; RESEND_FROM_EMAIL?: string };
-    if (!mailEnv.RESEND_API_KEY || !mailEnv.RESEND_FROM_EMAIL) return json({ error: "L'envoi d'e-mails n'est pas encore configuré." }, 503);
+    if (!emailIsConfigured(env)) return json({ error: "L'envoi d'e-mails n'est pas encore configuré." }, 503);
     const token = await createEmailVerification(env, user.id, user.email, "signup");
-    ctx.waitUntil(sendVerificationEmail(env, user.email, user.full_name, token, new URL(request.url).origin, "signup"));
+    const accepted = await sendVerificationEmail(env, user.email, user.full_name, token, new URL(request.url).origin, "signup", preferredLocale(request));
+    if (!accepted) {
+      await invalidateToken(env, "email_verifications", token);
+      return json({ error: "L'e-mail de confirmation n'a pas pu être envoyé. Réessayez plus tard." }, 503);
+    }
     return json({ message: "Un nouveau lien de confirmation a été envoyé." }, 202);
   }
 
@@ -852,9 +907,7 @@ async function handleApi(request: Request, env: Env, ctx: ExecutionContext): Pro
         env.DB.prepare("UPDATE conversations SET updated_at = CURRENT_TIMESTAMP WHERE id = ?").bind(conversationId),
       ]);
     }
-    const requester = await env.DB.prepare("SELECT email, full_name FROM profiles WHERE id = ?").bind(requestItem.requester_id).first<{ email: string; full_name: string }>();
     await createNotification(env, requestItem.requester_id, "offer", "Nouvelle réponse", `${user.full_name} a répondu à votre demande : ${requestItem.title}.`, `/app/messages?conversation=${conversationId}`);
-    if (requester) ctx.waitUntil(sendEmail(env, requester.email, "Nouvelle réponse sur ServiceGO", `<p>Bonjour ${escapeHtml(requester.full_name)},</p><p>${escapeHtml(user.full_name)} a répondu à votre demande : ${escapeHtml(requestItem.title)}.</p>`));
     return json({ id, conversation_id: conversationId, message: "Votre réponse a été envoyée. La discussion est ouverte." }, 201);
   }
 

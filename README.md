@@ -59,12 +59,12 @@ npx wrangler dev --local --port 8788
 1. Se connecter a Cloudflare avec `npx wrangler login`.
 2. Creer les ressources : `npx wrangler d1 create servicego-db` et `npx wrangler r2 bucket create servicego-uploads`.
 3. Copier l'identifiant D1 renvoye par Cloudflare dans `wrangler.jsonc` a la place de `00000000-0000-0000-0000-000000000000`.
-4. Dans Resend, verifier le domaine d'envoi puis choisir une adresse telle que `ServiceGO <bonjour@servicego.ma>`.
+4. Dans Resend, vérifier le domaine d'envoi puis choisir une adresse autorisée au format `ServiceGo — A&B TECHNOLOGIES <bonjour@votre-domaine.tld>`. Ne pas utiliser `aetbconseil@gmail.com` comme expéditeur tant que Resend ne l'autorise pas ; elle reste l'adresse de réponse officielle.
 5. Configurer les secrets : `npx wrangler secret put RESEND_API_KEY` et `npx wrangler secret put RESEND_FROM_EMAIL`. Ajouter `TURNSTILE_SECRET_KEY` lorsque Turnstile est active.
 6. Appliquer la base distante avec `npm run db:remote`, puis deployer avec `npm run deploy`.
 7. Pour GitHub Actions, ajouter `CLOUDFLARE_API_TOKEN`, `CLOUDFLARE_ACCOUNT_ID`, `RESEND_API_KEY`, `RESEND_FROM_EMAIL` et `TURNSTILE_SECRET_KEY` dans les secrets du depot.
 
-Les liens de confirmation expirent au bout de 24 heures. Tant qu'une adresse n'est pas confirmee, le compte peut se connecter mais ne peut ni publier, ni repondre, ni lancer une discussion. Cela limite les faux comptes sans creer deux types d'utilisateurs.
+Les liens de confirmation expirent au bout de 24 heures et les liens de réinitialisation au bout d'une heure. Tant qu'une adresse n'est pas confirmée, le compte peut se connecter mais ne peut ni publier, ni répondre, ni lancer une discussion. Cela limite les faux comptes sans créer deux types d'utilisateurs. Consultez aussi [la procédure e-mail](docs/EMAIL_DELIVERY_SETUP.md).
 
 La carte utilise Leaflet embarque dans le site. Par defaut, les tuiles OpenStreetMap sont adaptees au developpement et a un faible trafic. Pour un lancement commercial avec trafic significatif, remplacez `MAP_TILE_URL` et `MAP_ATTRIBUTION` dans `wrangler.jsonc` par un fournisseur de tuiles avec contrat/SLA ou par votre propre infrastructure; les tuiles publiques OpenStreetMap ne garantissent pas un service commercial a volume eleve.
 

@@ -1314,9 +1314,9 @@ app.addEventListener("submit", async (event) => {
       }
       notify(
         state.authMode === "register"
-          ? data.email_delivery_configured
+          ? data.email_delivery_accepted
             ? "Un lien de confirmation vient d'être envoyé."
-            : "Compte créé. L'envoi de l'e-mail de confirmation n'est pas encore configuré."
+            : "Compte créé. L'e-mail de confirmation n'a pas pu être envoyé. Utilisez « Renvoyer le lien » plus tard."
           : "Bienvenue sur ServiceGO.",
       );
     }
