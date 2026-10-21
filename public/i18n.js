@@ -1,4 +1,6 @@
 export const translationEntries = [
+  ["Vous pouvez afficher jusqu'à cinq services simultanément.", "You can display up to five services at once.", "يمكنك عرض ما يصل إلى خمس خدمات في الوقت نفسه."],
+  ["Le contenu du fichier ne correspond pas à son format.", "The file content does not match its format.", "لا يتطابق محتوى الملف مع تنسيقه."],
   ["Membre invalide.", "Invalid member.", "عضو غير صالح."],
   ["Cette interaction n'est pas disponible.", "This interaction is unavailable.", "هذا التفاعل غير متاح."],
   ["Ce membre peut de nouveau vous contacter.", "This member can contact you again.", "يمكن لهذا العضو التواصل معك مجددًا."],

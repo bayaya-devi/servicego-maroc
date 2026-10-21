@@ -11,6 +11,7 @@ const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const base = "http://servicego.test";
 let miniflare;
 let database;
+let uploads;
 let registrationAddress = 10;
 
 function splitSqlStatements(source) {
@@ -83,6 +84,7 @@ test.before(async () => {
     kvNamespaces: { UPLOADS: "servicego-security-uploads" },
   });
   database = await miniflare.getD1Database("DB");
+  uploads = await miniflare.getKVNamespace("UPLOADS");
 
   const migrationsDirectory = path.join(root, "migrations");
   const migrationNames = (await readdir(migrationsDirectory)).filter((name) => name.endsWith(".sql")).sort();
@@ -194,4 +196,43 @@ test("SG-007 exposes compatible v1 routes with stable error metadata", async () 
   const legacy = await api("/api/requests");
   assert.equal(legacy.response.status, 401);
   assert.equal("requestId" in legacy.json, false);
+});
+
+test("SG-010 applies the active service quota atomically", async () => {
+  const email = "service-quota@example.test";
+  await register(email, "Services");
+  await database.prepare("UPDATE profiles SET email_verified = 1 WHERE email = ?").bind(email).run();
+  const login = await api("/api/auth/login", { method: "POST", body: { email, password: "Phase1Test!" } });
+  const serviceBody = (index) => ({ category_id: "peinture", title: `Service ${index}`, description: "Description complète du service.", district: "Rabat", latitude: 34.02, longitude: -6.84 });
+  const results = await Promise.all(Array.from({ length: 10 }, (_, index) => api("/api/services", { cookie: login.cookie, method: "POST", body: serviceBody(index) })));
+  assert.equal(results.filter((result) => result.response.status === 201).length, 5);
+  assert.equal(results.filter((result) => result.response.status === 429).length, 5);
+  assert.equal(results.find((result) => result.response.status === 429).json.code, "SERVICE_QUOTA_EXCEEDED");
+});
+
+test("SG-011 rejects forged media and stores validated signatures", async () => {
+  const email = "media@example.test";
+  await register(email, "Media");
+  await database.prepare("UPDATE profiles SET email_verified = 1 WHERE email = ?").bind(email).run();
+  const login = await api("/api/auth/login", { method: "POST", body: { email, password: "Phase1Test!" } });
+  const upload = async (bytes, type) => {
+    const form = new FormData();
+    form.set("purpose", "avatar");
+    form.set("file", new File([bytes], "avatar.jpg", { type }));
+    const response = await miniflare.dispatchFetch(`${base}/api/uploads`, { method: "POST", headers: { cookie: login.cookie }, body: form });
+    return { response, json: await response.json() };
+  };
+  assert.equal((await upload(new TextEncoder().encode("not an image"), "image/jpeg")).response.status, 400);
+  const valid = await upload(Uint8Array.from([0xff, 0xd8, 0xff, 0xe0, 0x00, 0x10]), "image/jpeg");
+  assert.equal(valid.response.status, 201);
+  assert.match(valid.json.key, /\.jpg$/);
+
+  const userId = (await api("/api/me", { cookie: login.cookie })).json.user.id;
+  await database.prepare("UPDATE profiles SET is_admin = 1 WHERE id = ?").bind(userId).run();
+  const orphanKey = `uploads/${userId}/00000000-0000-0000-0000-000000000011.jpg`;
+  await uploads.put(orphanKey, Uint8Array.from([0xff, 0xd8, 0xff]), { metadata: { contentType: "image/jpeg", userId, purpose: "avatar", size: 3, uploadedAt: "2020-01-01T00:00:00.000Z" } });
+  const cleanup = await api("/api/admin/uploads/cleanup", { cookie: login.cookie, method: "POST" });
+  assert.equal(cleanup.response.status, 200);
+  assert.equal(cleanup.json.deleted, 1);
+  assert.equal(await uploads.get(orphanKey), null);
 });

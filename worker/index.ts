@@ -17,7 +17,7 @@ type User = {
 };
 
 type AuthUser = User & { password_hash: string };
-type UploadMetadata = { contentType: string; userId: string; purpose: string };
+type UploadMetadata = { contentType: string; userId: string; purpose: string; size?: number; uploadedAt?: string };
 
 const jsonHeaders = {
   "content-type": "application/json; charset=utf-8",
@@ -30,6 +30,7 @@ const passwordIterations = 100000;
 const newAccountRequestQuota = 3;
 const newAccountRequestQuotaWindowSeconds = 24 * 60 * 60;
 const maxJsonBodyBytes = 64 * 1024;
+const activeServiceQuota = 5;
 
 function json(data: unknown, status = 200, headers: HeadersInit = {}): Response {
   const responseHeaders = new Headers(jsonHeaders);
@@ -87,6 +88,28 @@ function validUploadKey(key: string, ownerId?: string): boolean {
 
 function validOwnedFileUrl(value: string, ownerId: string): boolean {
   return value === "" || (value.startsWith("/api/files/") && validUploadKey(value.slice("/api/files/".length), ownerId));
+}
+
+function validMediaSignature(bytes: Uint8Array, contentType: string): boolean {
+  const starts = (...signature: number[]) => signature.every((byte, index) => bytes[index] === byte);
+  const ascii = (start: number, value: string) => [...value].every((character, index) => bytes[start + index] === character.charCodeAt(0));
+  if (contentType === "image/jpeg") return starts(0xff, 0xd8, 0xff);
+  if (contentType === "image/png") return starts(0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a);
+  if (contentType === "image/webp") return ascii(0, "RIFF") && ascii(8, "WEBP");
+  if (contentType === "image/gif") return ascii(0, "GIF87a") || ascii(0, "GIF89a");
+  if (contentType === "video/mp4" || contentType === "audio/mp4") return ascii(4, "ftyp");
+  if (contentType === "video/webm" || contentType === "audio/webm") return starts(0x1a, 0x45, 0xdf, 0xa3);
+  if (contentType === "audio/ogg") return ascii(0, "OggS");
+  if (contentType === "audio/mpeg") return ascii(0, "ID3") || (bytes[0] === 0xff && (bytes[1] & 0xe0) === 0xe0);
+  return false;
+}
+
+function mediaExtension(contentType: string): string {
+  return ({
+    "image/jpeg": "jpg", "image/png": "png", "image/webp": "webp", "image/gif": "gif",
+    "video/mp4": "mp4", "video/webm": "webm", "audio/webm": "webm", "audio/ogg": "ogg",
+    "audio/mpeg": "mp3", "audio/mp4": "m4a",
+  } as Record<string, string>)[contentType] || "bin";
 }
 
 function getCookie(request: Request, name: string): string | null {
@@ -401,6 +424,38 @@ async function createQuotaLimitedRequest(env: Env, input: RequestInsert): Promis
     input.photoKey ?? null, input.status ?? "open", input.requesterId, newAccountRequestQuota,
   ).run();
   return (result.meta.changes ?? 0) === 1;
+}
+
+async function createQuotaLimitedService(env: Env, input: {
+  id: string; userId: string; categoryId: string; title: string; description: string; district: string;
+  latitude: number; longitude: number; priceHint: string | null;
+}): Promise<boolean> {
+  const result = await env.DB.prepare(
+    `INSERT INTO user_services (id, user_id, category_id, title, description, district, latitude, longitude, price_hint)
+     SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?
+     WHERE (SELECT COUNT(*) FROM user_services WHERE user_id = ? AND available = 1) < ?`,
+  ).bind(
+    input.id, input.userId, input.categoryId, input.title, input.description, input.district,
+    input.latitude, input.longitude, input.priceHint, input.userId, activeServiceQuota,
+  ).run();
+  return (result.meta.changes ?? 0) === 1;
+}
+
+async function cleanupOrphanUploads(env: Env): Promise<{ scanned: number; deleted: number }> {
+  if (!env.UPLOADS) return { scanned: 0, deleted: 0 };
+  const listed = await env.UPLOADS.list<UploadMetadata>({ prefix: "uploads/", limit: 100 });
+  let deleted = 0;
+  const cutoff = Date.now() - 24 * 60 * 60 * 1000;
+  for (const item of listed.keys) {
+    if (!item.metadata?.uploadedAt || Date.parse(item.metadata.uploadedAt) > cutoff) continue;
+    const referenced = await env.DB.prepare(
+      `SELECT 1 FROM profiles WHERE avatar_url = ? OR cover_url = ?
+       UNION ALL SELECT 1 FROM service_requests WHERE photo_key = ?
+       UNION ALL SELECT 1 FROM messages WHERE media_key = ? LIMIT 1`,
+    ).bind(`/api/files/${item.name}`, `/api/files/${item.name}`, item.name, item.name).first();
+    if (!referenced) { await env.UPLOADS.delete(item.name); deleted += 1; }
+  }
+  return { scanned: listed.keys.length, deleted };
 }
 
 function withSecurityHeaders(response: Response, request: Request): Response {
@@ -872,6 +927,13 @@ async function handleApi(request: Request, env: Env, ctx: ExecutionContext): Pro
     return json({ reports: results });
   }
 
+  if (pathname === "/api/admin/uploads/cleanup" && request.method === "POST") {
+    const user = await requireUser(request, env);
+    if (isResponse(user)) return user;
+    if (!user.is_admin) return json({ error: "Accès administrateur requis." }, 403);
+    return json(await cleanupOrphanUploads(env));
+  }
+
   const adminReportMatch = pathname.match(/^\/api\/admin\/reports\/([^/]+)$/);
   if (adminReportMatch && request.method === "PATCH") {
     const user = await requireUser(request, env);
@@ -983,12 +1045,11 @@ async function handleApi(request: Request, env: Env, ctx: ExecutionContext): Pro
     const category = await env.DB.prepare("SELECT id FROM categories WHERE id = ?").bind(categoryId).first<{ id: string }>();
     if (!category) return badRequest("Catégorie inconnue.");
     const id = crypto.randomUUID();
-    await env.DB.prepare(
-      `INSERT INTO user_services (id, user_id, category_id, title, description, district, latitude, longitude, price_hint)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-    )
-      .bind(id, user.id, categoryId, title, description, district, latitude, longitude, text(body.price_hint, 80) || null)
-      .run();
+    const created = await createQuotaLimitedService(env, {
+      id, userId: user.id, categoryId, title, description, district, latitude, longitude,
+      priceHint: text(body.price_hint, 80) || null,
+    });
+    if (!created) return json({ error: "Vous pouvez afficher jusqu'à cinq services simultanément.", code: "SERVICE_QUOTA_EXCEEDED" }, 429);
     return json({ id, message: "Votre service est visible sur la carte." }, 201);
   }
 
@@ -1297,9 +1358,11 @@ async function handleApi(request: Request, env: Env, ctx: ExecutionContext): Pro
     if (!allowedTypes.has(file.type)) return badRequest("Ce format de fichier n'est pas accepté.");
     const maxSize = file.type.startsWith("image/") ? 8 * 1024 * 1024 : file.type.startsWith("audio/") ? 15 * 1024 * 1024 : 24 * 1024 * 1024;
     if (file.size > maxSize) return badRequest("Ce fichier dépasse la taille autorisée.");
-    const extension = file.name.split(".").pop()?.toLowerCase().replace(/[^a-z0-9]/g, "") || "jpg";
+    const header = new Uint8Array(await file.slice(0, 16).arrayBuffer());
+    if (!validMediaSignature(header, file.type)) return badRequest("Le contenu du fichier ne correspond pas à son format.");
+    const extension = mediaExtension(file.type);
     const key = `uploads/${user.id}/${crypto.randomUUID()}.${extension}`;
-    await uploads.put(key, file.stream(), { metadata: { contentType: file.type, userId: user.id, purpose: text(form.get("purpose"), 30) || "attachment" } satisfies UploadMetadata });
+    await uploads.put(key, file.stream(), { metadata: { contentType: file.type, userId: user.id, purpose: text(form.get("purpose"), 30) || "attachment", size: file.size, uploadedAt: new Date().toISOString() } satisfies UploadMetadata });
     return json({ key, url: `/api/files/${key}` }, 201);
   }
 

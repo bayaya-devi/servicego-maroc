@@ -25,8 +25,9 @@ Toutes les réponses API contiennent `X-Request-Id`. Les erreurs `/api/v1` ajout
 | POST | `/api/offers/:id/accept` | Mise en relation | Session | Demandeur, transition conditionnelle ouverte -> attribuee |
 | POST | `/api/services/:id/request` | Mise en relation | Session | Membre confirme, service tiers disponible |
 | GET/POST | `/api/conversations/:id/messages` | Messages | Session | Participant uniquement |
-| POST | `/api/uploads` | Media | Session | Membre confirme, type/taille, quota |
+| POST | `/api/uploads` | Media | Session | Membre confirmé, type/taille/signature binaire, quota |
 | GET | `/api/files/:key` | Media | Session | Proprietaire ou reference autorisee |
+| POST | `/api/admin/uploads/cleanup` | Media | Admin | Nettoyage borné des objets KV orphelins âgés de plus de 24 h |
 | POST | `/api/reports` | Confiance | Session | Membre confirme, deduplication et quota |
 | GET/PATCH | `/api/admin/*` | Administration | Session administrateur | `is_admin` lu exclusivement depuis D1 |
 
