@@ -1,6 +1,8 @@
 # Inventaire API ServiceGO
 
-Ce registre decrit les contrats actuellement exposes. Les routes restent sans version afin de preserver le frontend en production; toute future API v1 devra etre introduite en parallele et migree progressivement.
+Ce registre décrit les contrats actuellement exposés. Chaque route `/api/...` est aussi disponible sous `/api/v1/...` afin de préserver le frontend Web pendant la migration progressive. Le contrat machine lisible se trouve dans `docs/openapi-v1.yaml`.
+
+Toutes les réponses API contiennent `X-Request-Id`. Les erreurs `/api/v1` ajoutent `code` et `requestId` au message historique `{ "error": "..." }`; les routes non versionnées conservent leur corps actuel pour compatibilité descendante. Les corps JSON sont limités à 64 Kio côté Worker.
 
 | Methode | Chemin | Proprietaire | Authentification | Controle principal |
 | --- | --- | --- | --- | --- |

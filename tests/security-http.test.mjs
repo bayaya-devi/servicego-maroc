@@ -178,3 +178,20 @@ test("SG-006 blocks new offers and messages in both directions", async () => {
   const blockedList = await api("/api/blocks", { cookie: owner.cookie });
   assert.equal(blockedList.json.blocks.some((item) => item.id === providerId), true);
 });
+
+test("SG-007 exposes compatible v1 routes with stable error metadata", async () => {
+  const health = await api("/api/v1/health");
+  assert.equal(health.response.status, 200);
+  assert.equal(health.json.ok, true);
+  assert.match(health.response.headers.get("x-request-id"), /^[0-9a-f-]{36}$/i);
+
+  const unauthorizedResponse = await miniflare.dispatchFetch(`${base}/api/v1/requests`);
+  const unauthorizedBody = await unauthorizedResponse.json();
+  assert.equal(unauthorizedResponse.status, 401);
+  assert.equal(unauthorizedBody.code, "UNAUTHORIZED");
+  assert.equal(unauthorizedBody.requestId, unauthorizedResponse.headers.get("x-request-id"));
+
+  const legacy = await api("/api/requests");
+  assert.equal(legacy.response.status, 401);
+  assert.equal("requestId" in legacy.json, false);
+});

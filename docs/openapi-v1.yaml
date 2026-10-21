@@ -1,0 +1,168 @@
+openapi: 3.1.0
+info:
+  title: ServiceGo API
+  version: 1.0.0
+  description: >-
+    Contrat HTTP progressif pour le Web et les futurs clients mobiles. Les routes
+    /api/v1 sont des alias compatibles des routes /api existantes pendant la migration.
+servers:
+  - url: /api/v1
+security:
+  - sessionCookie: []
+paths:
+  /health:
+    get:
+      security: []
+      operationId: health
+      responses:
+        "200":
+          description: Service disponible
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [ok, city, time]
+                properties:
+                  ok: { type: boolean, const: true }
+                  city: { type: string }
+                  time: { type: string, format: date-time }
+  /auth/register:
+    post:
+      security: []
+      operationId: register
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/RegisterInput" }
+      responses:
+        "201": { description: Compte créé et session ouverte }
+        "400": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+        "429": { $ref: "#/components/responses/Error" }
+  /auth/login:
+    post:
+      security: []
+      operationId: login
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email, password]
+              properties:
+                email: { type: string, format: email, maxLength: 254 }
+                password: { type: string, minLength: 8, maxLength: 200 }
+      responses:
+        "200": { description: Session ouverte }
+        "401": { $ref: "#/components/responses/Error" }
+        "429": { $ref: "#/components/responses/Error" }
+  /me:
+    get:
+      operationId: currentUser
+      responses:
+        "200": { description: Profil courant ou valeur null }
+    patch:
+      operationId: updateCurrentUser
+      responses:
+        "200": { description: Profil mis à jour }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+    delete:
+      operationId: deleteCurrentUser
+      responses:
+        "200": { description: Compte désactivé et données personnelles retirées }
+        "401": { $ref: "#/components/responses/Error" }
+  /map:
+    get:
+      operationId: mapListings
+      responses:
+        "200": { description: Demandes et services visibles avec coordonnées arrondies }
+        "401": { $ref: "#/components/responses/Error" }
+  /requests:
+    get:
+      operationId: ownRequests
+      responses:
+        "200": { description: Demandes du membre connecté }
+        "401": { $ref: "#/components/responses/Error" }
+    post:
+      operationId: createRequest
+      responses:
+        "201": { description: Demande créée }
+        "400": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "429": { $ref: "#/components/responses/Error" }
+  /services:
+    get:
+      operationId: ownServices
+      responses:
+        "200": { description: Services du membre connecté }
+        "401": { $ref: "#/components/responses/Error" }
+    post:
+      operationId: createService
+      responses:
+        "201": { description: Service créé }
+        "400": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+  /blocks:
+    get:
+      operationId: listBlocks
+      responses:
+        "200": { description: Membres bloqués par le membre connecté }
+        "401": { $ref: "#/components/responses/Error" }
+  /blocks/{userId}:
+    parameters:
+      - in: path
+        name: userId
+        required: true
+        schema: { type: string, maxLength: 80 }
+    post:
+      operationId: blockUser
+      responses:
+        "201": { description: Membre bloqué }
+        "400": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+    delete:
+      operationId: unblockUser
+      responses:
+        "200": { description: Membre débloqué }
+  /conversations:
+    get:
+      operationId: conversations
+      responses:
+        "200": { description: Conversations du membre connecté }
+        "401": { $ref: "#/components/responses/Error" }
+components:
+  securitySchemes:
+    sessionCookie:
+      type: apiKey
+      in: cookie
+      name: sg_session
+  responses:
+    Error:
+      description: Erreur stable de l'API v1
+      headers:
+        X-Request-Id:
+          schema: { type: string }
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+  schemas:
+    Error:
+      type: object
+      required: [error, code, requestId]
+      properties:
+        error: { type: string }
+        code: { type: string }
+        requestId: { type: string }
+    RegisterInput:
+      type: object
+      required: [email, password, full_name, district]
+      properties:
+        email: { type: string, format: email, maxLength: 254 }
+        password: { type: string, minLength: 8, maxLength: 200 }
+        full_name: { type: string, minLength: 2, maxLength: 80 }
+        phone: { type: string, maxLength: 30 }
+        district: { type: string, maxLength: 80 }
+        turnstile_token: { type: string, maxLength: 2048 }

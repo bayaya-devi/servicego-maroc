@@ -29,9 +29,12 @@ const jsonHeaders = {
 const passwordIterations = 100000;
 const newAccountRequestQuota = 3;
 const newAccountRequestQuotaWindowSeconds = 24 * 60 * 60;
+const maxJsonBodyBytes = 64 * 1024;
 
 function json(data: unknown, status = 200, headers: HeadersInit = {}): Response {
-  return new Response(JSON.stringify(data), { status, headers: { ...jsonHeaders, ...headers } });
+  const responseHeaders = new Headers(jsonHeaders);
+  new Headers(headers).forEach((value, key) => responseHeaders.set(key, value));
+  return new Response(JSON.stringify(data), { status, headers: responseHeaders });
 }
 
 function badRequest(message: string): Response {
@@ -155,7 +158,11 @@ async function passwordMatches(password: string, stored: string): Promise<boolea
 
 async function readBody(request: Request): Promise<Record<string, unknown> | null> {
   try {
-    const body = await request.json<unknown>();
+    const declaredLength = Number(request.headers.get("content-length") || 0);
+    if (declaredLength > maxJsonBodyBytes) return null;
+    const source = await request.text();
+    if (new TextEncoder().encode(source).byteLength > maxJsonBodyBytes) return null;
+    const body = JSON.parse(source) as unknown;
     return body && typeof body === "object" && !Array.isArray(body) ? (body as Record<string, unknown>) : null;
   } catch {
     return null;
@@ -407,6 +414,29 @@ function withSecurityHeaders(response: Response, request: Request): Response {
   return new Response(response.body, { status: response.status, statusText: response.statusText, headers });
 }
 
+function errorCodeForStatus(status: number): string {
+  if (status === 400) return "INVALID_REQUEST";
+  if (status === 401) return "UNAUTHORIZED";
+  if (status === 403) return "FORBIDDEN";
+  if (status === 404) return "NOT_FOUND";
+  if (status === 405) return "METHOD_NOT_ALLOWED";
+  if (status === 409) return "CONFLICT";
+  if (status === 413) return "PAYLOAD_TOO_LARGE";
+  if (status === 429) return "RATE_LIMITED";
+  if (status >= 500) return "INTERNAL_ERROR";
+  return "REQUEST_FAILED";
+}
+
+async function withApiMetadata(response: Response, request: Request, requestId: string): Promise<Response> {
+  const headers = new Headers(response.headers);
+  headers.set("x-request-id", requestId);
+  if (!new URL(request.url).pathname.startsWith("/api/v1/") || response.status < 400 || !headers.get("content-type")?.includes("application/json")) {
+    return new Response(response.body, { status: response.status, statusText: response.statusText, headers });
+  }
+  const payload: Record<string, unknown> = await response.json<Record<string, unknown>>().catch(() => ({}));
+  return json({ ...payload, code: payload.code || errorCodeForStatus(response.status), requestId }, response.status, headers);
+}
+
 async function findOrCreateConversation(env: Env, requestId: string, firstUserId: string, secondUserId: string): Promise<string> {
   const existing = await env.DB.prepare(
     `SELECT id FROM conversations WHERE request_id = ?
@@ -569,7 +599,7 @@ async function handleAuth(request: Request, env: Env, ctx: ExecutionContext, pat
 
 async function handleApi(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
   const url = new URL(request.url);
-  const { pathname } = url;
+  const pathname = url.pathname.startsWith("/api/v1/") ? `/api${url.pathname.slice("/api/v1".length)}` : url.pathname;
   const authResponse = await handleAuth(request, env, ctx, pathname);
   if (authResponse) return authResponse;
 
@@ -1303,12 +1333,12 @@ export default {
   async fetch(request, env, ctx): Promise<Response> {
     const url = new URL(request.url);
     if (!url.pathname.startsWith("/api/")) return withSecurityHeaders(await env.ASSETS.fetch(request), request);
+    const requestId = text(request.headers.get("cf-ray"), 80) || crypto.randomUUID();
     try {
-      return withSecurityHeaders(await handleApi(request, env, ctx), request);
+      return withSecurityHeaders(await withApiMetadata(await handleApi(request, env, ctx), request, requestId), request);
     } catch (error) {
-      const message = error instanceof Error ? error.message : "unknown";
-      console.error(JSON.stringify({ event: "api_error", path: url.pathname, message }));
-      return withSecurityHeaders(json({ error: "Une erreur est survenue. Réessayez." }, 500), request);
+      console.error(JSON.stringify({ event: "request_failed", requestId, method: request.method, pathname: url.pathname, error: error instanceof Error ? error.name : "UnknownError" }));
+      return withSecurityHeaders(await withApiMetadata(json({ error: "Une erreur est survenue. Réessayez." }, 500), request, requestId), request);
     }
   },
 } satisfies ExportedHandler<Env>;
