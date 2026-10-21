@@ -223,10 +223,11 @@ test("the immediate-help CTA opens signup first and sends authenticated users to
 });
 
 test("the V2.3 member experience keeps the worldwide map, rich messaging and dashboard workflows connected", async () => {
-  const [source, styles, worker, migration, readCursorMigration, conversationMigration, wrangler] = await Promise.all([
+  const [source, styles, worker, validation, migration, readCursorMigration, conversationMigration, wrangler] = await Promise.all([
     read("public/app.js"),
     read("public/styles.css"),
     read("worker/index.ts"),
+    read("worker/lib/validation.ts"),
     read("migrations/0004_v23_global_messaging_profiles_reviews.sql"),
     read("migrations/0005_v23_conversation_read_cursor.sql"),
     read("migrations/0006_v23_conversation_uniqueness.sql"),
@@ -264,7 +265,7 @@ test("the V2.3 member experience keeps the worldwide map, rich messaging and das
   assert.match(styles, /\.messages-page \.messages-layout::before/);
   assert.match(styles, /@media \(max-width:760px\)[\s\S]*\.messages-layout/);
   assert.match(worker, /validCoordinates/);
-  assert.match(worker, /function validUploadKey/);
+  assert.match(validation, /function validUploadKey/);
   assert.match(worker, /validOwnedFileUrl\(avatarUrl, user\.id\)/);
   assert.doesNotMatch(worker, /insideMorocco/);
   assert.match(worker, /\/api\\\/requests\\\/\(\[\^\/\]\+\)\\\/complete/);

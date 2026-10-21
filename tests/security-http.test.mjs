@@ -69,13 +69,23 @@ async function register(email, name) {
 const requestBody = (title) => ({ category_id: "plomberie", title, description: "Description de test suffisamment longue.", district: "Rabat", latitude: 34.02, longitude: -6.84, urgency: "normal" });
 
 test.before(async () => {
-  const workerSource = await readFile(path.join(root, "worker", "index.ts"), "utf8");
-  const script = ts.transpileModule(workerSource, {
-    compilerOptions: { module: ts.ModuleKind.ESNext, target: ts.ScriptTarget.ES2022 },
-    fileName: "worker/index.ts",
-    reportDiagnostics: true,
-  });
-  const errors = script.diagnostics?.filter((diagnostic) => diagnostic.category === ts.DiagnosticCategory.Error) ?? [];
+  const sources = [
+    ["worker.js", "worker/index.ts"],
+    ["lib/security.js", "worker/lib/security.ts"],
+    ["lib/validation.js", "worker/lib/validation.ts"],
+  ];
+  const scripts = await Promise.all(sources.map(async ([moduleName, sourceName]) => {
+    const source = await readFile(path.join(root, ...sourceName.split("/")), "utf8");
+    const output = ts.transpileModule(source, {
+      compilerOptions: { module: ts.ModuleKind.ESNext, target: ts.ScriptTarget.ES2022 },
+      fileName: sourceName,
+      reportDiagnostics: true,
+    });
+    return { moduleName, sourceName, output };
+  }));
+  const errors = scripts.flatMap(({ sourceName, output }) => (output.diagnostics ?? [])
+    .filter((diagnostic) => diagnostic.category === ts.DiagnosticCategory.Error)
+    .map((diagnostic) => ({ sourceName, diagnostic })));
   assert.deepEqual(errors, [], "The Worker must transpile before security tests run");
 
   miniflare = new Miniflare({
@@ -86,7 +96,7 @@ test.before(async () => {
         compatibilityFlags: ["nodejs_compat"],
         manifest: {
           mainModule: "worker.js",
-          modules: { "worker.js": { type: "esm", contents: script.outputText } },
+          modules: Object.fromEntries(scripts.map(({ moduleName, output }) => [moduleName, { type: "esm", contents: output.outputText }])),
         },
         env: {
           APP_NAME: { type: "text", value: "ServiceGO" },

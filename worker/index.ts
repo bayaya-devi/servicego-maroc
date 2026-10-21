@@ -1,3 +1,6 @@
+import { clearSessionCookie, getCookie, passwordHash, passwordMatches, randomToken, sessionCookie, tokenHash } from "./lib/security.js";
+import { decodeCursor, encodeCursor, mediaExtension, readBody, text, validCoordinates, validEmail, validMediaSignature, validOwnedFileUrl, validUploadKey } from "./lib/validation.js";
+
 type User = {
   id: string;
   email: string;
@@ -26,10 +29,8 @@ const jsonHeaders = {
   "referrer-policy": "same-origin",
 };
 
-const passwordIterations = 100000;
 const newAccountRequestQuota = 3;
 const newAccountRequestQuotaWindowSeconds = 24 * 60 * 60;
-const maxJsonBodyBytes = 64 * 1024;
 const activeServiceQuota = 5;
 const currentTermsVersion = "2026-10-21";
 
@@ -61,150 +62,6 @@ function requestQuotaExceeded(): Response {
 
 function blockedInteraction(): Response {
   return json({ error: "Cette interaction n'est pas disponible.", code: "USER_BLOCKED" }, 403);
-}
-
-function text(value: unknown, max = 280): string {
-  return typeof value === "string" ? value.trim().slice(0, max) : "";
-}
-
-function encodeCursor(value: number | null | undefined): string | null {
-  return value ? btoa(String(value)).replaceAll("=", "") : null;
-}
-
-function decodeCursor(value: string | null): number | null {
-  if (!value) return null;
-  try {
-    const decoded = Number(atob(value));
-    return Number.isSafeInteger(decoded) && decoded > 0 ? decoded : null;
-  } catch {
-    return null;
-  }
-}
-
-function validEmail(value: string): boolean {
-  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value) && value.length <= 254;
-}
-
-function validCoordinates(latitude: number, longitude: number): boolean {
-  return (
-    Number.isFinite(latitude) &&
-    Number.isFinite(longitude) &&
-    latitude >= -85.051129 &&
-    latitude <= 85.051129 &&
-    longitude >= -180 &&
-    longitude <= 180
-  );
-}
-
-function validUploadKey(key: string, ownerId?: string): boolean {
-  const match = key.match(/^uploads\/([A-Za-z0-9_-]{1,80})\/[0-9a-f-]{36}\.[a-z0-9]{1,10}$/);
-  return Boolean(match && (!ownerId || match[1] === ownerId));
-}
-
-function validOwnedFileUrl(value: string, ownerId: string): boolean {
-  return value === "" || (value.startsWith("/api/files/") && validUploadKey(value.slice("/api/files/".length), ownerId));
-}
-
-function validMediaSignature(bytes: Uint8Array, contentType: string): boolean {
-  const starts = (...signature: number[]) => signature.every((byte, index) => bytes[index] === byte);
-  const ascii = (start: number, value: string) => [...value].every((character, index) => bytes[start + index] === character.charCodeAt(0));
-  if (contentType === "image/jpeg") return starts(0xff, 0xd8, 0xff);
-  if (contentType === "image/png") return starts(0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a);
-  if (contentType === "image/webp") return ascii(0, "RIFF") && ascii(8, "WEBP");
-  if (contentType === "image/gif") return ascii(0, "GIF87a") || ascii(0, "GIF89a");
-  if (contentType === "video/mp4" || contentType === "audio/mp4") return ascii(4, "ftyp");
-  if (contentType === "video/webm" || contentType === "audio/webm") return starts(0x1a, 0x45, 0xdf, 0xa3);
-  if (contentType === "audio/ogg") return ascii(0, "OggS");
-  if (contentType === "audio/mpeg") return ascii(0, "ID3") || (bytes[0] === 0xff && (bytes[1] & 0xe0) === 0xe0);
-  return false;
-}
-
-function mediaExtension(contentType: string): string {
-  return ({
-    "image/jpeg": "jpg", "image/png": "png", "image/webp": "webp", "image/gif": "gif",
-    "video/mp4": "mp4", "video/webm": "webm", "audio/webm": "webm", "audio/ogg": "ogg",
-    "audio/mpeg": "mp3", "audio/mp4": "m4a",
-  } as Record<string, string>)[contentType] || "bin";
-}
-
-function getCookie(request: Request, name: string): string | null {
-  const source = request.headers.get("cookie") ?? "";
-  for (const part of source.split(";")) {
-    const [key, ...value] = part.trim().split("=");
-    if (key === name) return value.join("=") || null;
-  }
-  return null;
-}
-
-function sessionCookie(id: string, request: Request): string {
-  const secure = new URL(request.url).protocol === "https:" ? "; Secure" : "";
-  return `sg_session=${id}; Path=/; HttpOnly; SameSite=Lax; Max-Age=2592000${secure}`;
-}
-
-function clearSessionCookie(request: Request): string {
-  const secure = new URL(request.url).protocol === "https:" ? "; Secure" : "";
-  return `sg_session=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0${secure}`;
-}
-
-function toHex(bytes: ArrayBuffer): string {
-  return [...new Uint8Array(bytes)].map((byte) => byte.toString(16).padStart(2, "0")).join("");
-}
-
-function fromHex(value: string): Uint8Array<ArrayBuffer> {
-  const bytes = new Uint8Array(value.length / 2);
-  for (let i = 0; i < bytes.length; i += 1) bytes[i] = Number.parseInt(value.slice(i * 2, i * 2 + 2), 16);
-  return bytes;
-}
-
-function randomHex(length: number): string {
-  const bytes = crypto.getRandomValues(new Uint8Array(length));
-  return toHex(bytes.buffer);
-}
-
-function randomToken(): string {
-  const bytes = crypto.getRandomValues(new Uint8Array(32));
-  let value = "";
-  for (const byte of bytes) value += String.fromCharCode(byte);
-  return btoa(value).replaceAll("+", "-").replaceAll("/", "_").replaceAll("=", "");
-}
-
-async function tokenHash(token: string): Promise<string> {
-  return toHex(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(token)));
-}
-
-async function passwordHash(password: string, salt = randomHex(16)): Promise<string> {
-  const key = await crypto.subtle.importKey("raw", new TextEncoder().encode(password), "PBKDF2", false, ["deriveBits"]);
-  const bits = await crypto.subtle.deriveBits(
-    { name: "PBKDF2", hash: "SHA-256", salt: fromHex(salt), iterations: passwordIterations },
-    key,
-    256,
-  );
-  return `pbkdf2:${passwordIterations}:${salt}:${toHex(bits)}`;
-}
-
-async function passwordMatches(password: string, stored: string): Promise<boolean> {
-  const [algorithm, iterations, salt, expected] = stored.split(":");
-  if (algorithm !== "pbkdf2" || iterations !== String(passwordIterations) || !salt || !expected) return false;
-  const actual = await passwordHash(password, salt);
-  const actualBytes = new TextEncoder().encode(actual);
-  const expectedBytes = new TextEncoder().encode(stored);
-  let difference = actualBytes.length ^ expectedBytes.length;
-  const length = Math.max(actualBytes.length, expectedBytes.length);
-  for (let index = 0; index < length; index += 1) difference |= (actualBytes[index] ?? 0) ^ (expectedBytes[index] ?? 0);
-  return difference === 0;
-}
-
-async function readBody(request: Request): Promise<Record<string, unknown> | null> {
-  try {
-    const declaredLength = Number(request.headers.get("content-length") || 0);
-    if (declaredLength > maxJsonBodyBytes) return null;
-    const source = await request.text();
-    if (new TextEncoder().encode(source).byteLength > maxJsonBodyBytes) return null;
-    const body = JSON.parse(source) as unknown;
-    return body && typeof body === "object" && !Array.isArray(body) ? (body as Record<string, unknown>) : null;
-  } catch {
-    return null;
-  }
 }
 
 async function currentUser(request: Request, env: Env): Promise<User | null> {
