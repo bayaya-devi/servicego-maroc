@@ -144,11 +144,11 @@ textarea { min-height:100px;resize:vertical }
 .story-scene { position:relative;min-height:100svh;display:grid;place-items:center;isolation:isolate;overflow:hidden }
 .story-scene::before { content:"";position:absolute;z-index:-3;inset:-4%;background-size:cover;background-position:center;transition:transform 1.4s cubic-bezier(.2,.8,.2,1),filter 1s ease }
 .story-scene::after { content:"";position:absolute;z-index:-2;inset:0;pointer-events:none }
-.discovery::before { background-image:url('/assets/scenes/marrakech-people.jpg');transform:scale(1.06) }
+.discovery::before { background-image:url('/assets/scenes/marrakech-people.webp');transform:scale(1.06) }
 .discovery::after { background:linear-gradient(90deg,rgba(10,27,46,.9) 0%,rgba(10,27,46,.65) 47%,rgba(10,27,46,.18) 100%) }
-.possibilities::before { background-image:url('/assets/scenes/rabat-people.jpg');background-position:center 58%;filter:saturate(.78) brightness(1.1) }
+.possibilities::before { background-image:url('/assets/scenes/rabat-people.webp');background-position:center 58%;filter:saturate(.78) brightness(1.1) }
 .possibilities::after { background:linear-gradient(180deg,rgba(242,250,248,.93),rgba(230,246,240,.84) 52%,rgba(255,237,218,.88)) }
-.conclusion::before { background-image:url('/assets/scenes/marrakech-people.jpg');filter:saturate(.72) brightness(.62);transform:scale(1.04) }
+.conclusion::before { background-image:url('/assets/scenes/marrakech-people.webp');filter:saturate(.72) brightness(.62);transform:scale(1.04) }
 .conclusion::after { background:linear-gradient(180deg,rgba(16,33,55,.74),rgba(18,54,58,.82)) }
 .story-scene.is-visible::before { transform:scale(1) }
 .ambient-layer { position:absolute;z-index:-1;inset:0;background:radial-gradient(circle at 24% 28%,var(--sg-light-blue),transparent 34%),radial-gradient(circle at 76% 66%,var(--sg-light-peach),transparent 38%) }

@@ -201,7 +201,7 @@ function cityOptions(selected = "Rabat") {
     .join("");
 }
 function brand() {
-  return `<button class="brand" data-action="home" aria-label="Accueil ServiceGO"><span class="brand-symbol" aria-hidden="true"><img src="/assets/servicego-symbol.png" alt=""></span><strong>Service<span>GO</span></strong></button>`;
+  return `<button class="brand" data-action="home" aria-label="Accueil ServiceGO"><span class="brand-symbol" aria-hidden="true"><img src="/assets/servicego-symbol.svg" alt=""></span><strong>Service<span>GO</span></strong></button>`;
 }
 const routeForView = { map: "/app/carte", messages: "/app/messages", profile: "/app/profil", admin: "/app/admin" };
 const viewForRoute = Object.fromEntries(Object.entries(routeForView).map(([view, route]) => [route, view]));

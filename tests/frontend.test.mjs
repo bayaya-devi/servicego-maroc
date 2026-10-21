@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { readFile } from "node:fs/promises";
+import { access, readFile, stat } from "node:fs/promises";
 import test from "node:test";
 
 const read = (path) => readFile(new URL(`../${path}`, import.meta.url), "utf8");
@@ -8,7 +8,7 @@ test("the document exposes the design system and a skip link", async () => {
   const html = await read("public/index.html");
   assert.match(html, /tokens\.css/);
   assert.match(html, /class="skip-link" href="#main-content"/);
-  assert.match(html, /assets\/servicego-symbol\.png/);
+  assert.match(html, /assets\/servicego-symbol\.svg/);
 });
 
 test("official semantic colors and responsive rules are centralized", async () => {
@@ -59,9 +59,24 @@ test("public information and immersive assets are wired locally", async () => {
   const [source, styles] = await Promise.all([read("public/app.js"), read("public/styles.css")]);
   assert.match(source, /faqModal/);
   assert.match(source, /legalModal/);
-  assert.match(styles, /assets\/scenes\/rabat-people\.jpg/);
-  assert.match(styles, /assets\/scenes\/marrakech-people\.jpg/);
+  assert.match(styles, /assets\/scenes\/rabat-people\.webp/);
+  assert.match(styles, /assets\/scenes\/marrakech-people\.webp/);
   assert.doesNotMatch(source, /mailto:contact@servicego\.ma/);
+});
+
+test("runtime images respect the mobile asset budget", async () => {
+  const runtimeImages = [
+    "public/assets/servicego-symbol.svg",
+    "public/assets/scenes/rabat-people.webp",
+    "public/assets/scenes/marrakech-people.webp",
+    "public/assets/scenes/madrid-plaza.webp",
+    "public/assets/scenes/paris-republique.webp",
+    "public/assets/scenes/paris-crossing.webp",
+    "public/assets/scenes/mallorca-street.webp",
+  ];
+  for (const asset of runtimeImages) assert.ok((await stat(new URL(`../${asset}`, import.meta.url))).size <= 350 * 1024, `${asset} exceeds 350 KiB`);
+  await assert.rejects(access(new URL("../public/assets/servicego-symbol.png", import.meta.url)));
+  await assert.rejects(access(new URL("../public/assets/servicego-characters.png", import.meta.url)));
 });
 
 test("the operational map requires a session and rounds coordinates", async () => {
