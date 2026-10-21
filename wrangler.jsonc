@@ -35,5 +35,36 @@
   "observability": {
     "enabled": true,
     "head_sampling_rate": 1
+  },
+  "env": {
+    "staging": {
+      "name": "servicego-maroc-staging",
+      "vars": {
+        "APP_NAME": "ServiceGO Staging",
+        "APP_CITY": "Maroc",
+        "ENVIRONMENT": "staging",
+        "BREVO_FROM_NAME": "ServiceGo — A&B TECHNOLOGIES",
+        "MAP_TILE_URL": "https://tile.openstreetmap.org/{z}/{x}/{y}.png",
+        "MAP_ATTRIBUTION": "&copy; <a href=\"https://www.openstreetmap.org/copyright\" target=\"_blank\" rel=\"noreferrer\">OpenStreetMap</a> contributors"
+      },
+      "d1_databases": [
+        {
+          "binding": "DB",
+          "database_name": "servicego-staging",
+          "database_id": "3afdcdd9-7dc3-4e6e-bf47-0a20974bfc41",
+          "migrations_dir": "./migrations"
+        }
+      ],
+      "kv_namespaces": [
+        {
+          "binding": "UPLOADS",
+          "id": "01670046256044588e3683a9bd50c318"
+        }
+      ],
+      "observability": {
+        "enabled": true,
+        "head_sampling_rate": 1
+      }
+    }
   }
 }
