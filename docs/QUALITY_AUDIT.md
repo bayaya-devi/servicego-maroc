@@ -19,13 +19,13 @@ Contextes axe controles :
 | --- | ---: |
 | Violations axe serieuses ou critiques | 0 dans les quatre contextes |
 | Debordement horizontal | 0 dans les quatre contextes |
-| Lighthouse performance mobile | 73 / 100 |
+| Lighthouse performance mobile | 79 / 100 |
 | Lighthouse accessibilite | 100 / 100 |
 | Lighthouse bonnes pratiques | 96 / 100 |
 | Lighthouse SEO | 92 / 100 |
-| Largest Contentful Paint | 4 889 ms |
+| Largest Contentful Paint | 5 006 ms |
 | Cumulative Layout Shift | 0 |
-| Total Blocking Time | 267 ms |
+| Total Blocking Time | 108 ms |
 
 Le symbole est en SVG, les photographies chargees sont en WebP et la photographie de Rabat est prechargee. Le LCP synthetique reste la principale marge d'amelioration. Un test sur appareils reels et reseaux mobiles reels demeure necessaire avant de qualifier les Core Web Vitals de terrain.
 

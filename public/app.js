@@ -2,6 +2,15 @@ import * as Leaflet from "/vendor/leaflet/leaflet-src.esm.js";
 import { preloadPhotoSet, selectPhotoSet } from "/photo-catalog.js";
 import { translate } from "/i18n.js";
 const app = document.querySelector("#app");
+function globeSupported() {
+  if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) return false;
+  try {
+    const canvas = document.createElement("canvas");
+    return Boolean(canvas.getContext("webgl2") || canvas.getContext("webgl"));
+  } catch {
+    return false;
+  }
+}
 const savedLocale = localStorage.getItem("servicego-locale");
 const browserLocale = (navigator.languages?.[0] || navigator.language || "fr").toLowerCase();
 const initialLocale = savedLocale || (browserLocale.startsWith("ar") ? "ar" : browserLocale.startsWith("en") ? "en" : "fr");
@@ -31,7 +40,7 @@ const state = {
   locale: initialLocale,
   mapFilter: "all",
   mapCategory: "all",
-  mapMode: "2d",
+  mapMode: globeSupported() && window.innerWidth >= 760 ? "globe" : "2d",
   publicMenuOpen: false,
   languageMenuOpen: false,
   legalTab: 0,
@@ -50,6 +59,7 @@ const state = {
 };
 let leafletMap = null;
 let mapMarkerLayer = null;
+let globeCleanup = null;
 let userLocationMarker = null;
 let marketingMap = null;
 let modalReturnAction = null;
@@ -305,11 +315,31 @@ function accessibleMapList() {
   if (!entries.length) return `<p class="page-lead">Aucun résultat avec ces filtres.</p>`;
   return entries.map((item) => `<button class="map-list-item ${item.kind}" data-action="select" data-type="${item.type}" data-id="${item.id}"><span>${item.kind === "need" ? "?" : "+"}</span><b>${escape(item.title)}</b><small>${escape(item.district)}</small></button>`).join("");
 }
-function mountInteractiveMap() {
+async function mountInteractiveMap() {
   const target = document.querySelector("#liveMap");
   if (!target) return;
+  globeCleanup?.();
+  globeCleanup = null;
   longPressCleanup?.();
   leafletMap?.remove();
+  leafletMap = null;
+  const entries = [
+    ...state.map.requests.map((item) => ({ item, type: "request", kind: "need", latitude: item.latitude, longitude: item.longitude, urgent: item.urgency === "urgent" })),
+    ...state.map.services.map((item) => ({ item, type: "service", kind: "help", latitude: item.latitude, longitude: item.longitude, urgent: false })),
+  ].filter((entry) => (state.mapFilter === "all" || state.mapFilter === entry.type) && (state.mapCategory === "all" || state.mapCategory === entry.item.category_id));
+  if (state.mapMode === "globe") {
+    try {
+      const { mountGlobe } = await import("/globe.js");
+      if (!target.isConnected || state.mapMode !== "globe") return;
+      globeCleanup = mountGlobe(target, entries, (entry) => {
+        state.selected = { type: entry.type, item: entry.item };
+        render();
+      });
+      return;
+    } catch {
+      state.mapMode = "2d";
+    }
+  }
   leafletMap = Leaflet.map(target, {
     zoomControl: true,
     minZoom: 2,
@@ -320,18 +350,6 @@ function mountInteractiveMap() {
     maxZoom: 19,
     attribution: state.config.mapAttribution,
   }).addTo(leafletMap);
-  const entries = [
-    ...state.map.requests.map((item) => ({
-      item,
-      type: "request",
-      kind: "need",
-    })),
-    ...state.map.services.map((item) => ({
-      item,
-      type: "service",
-      kind: "help",
-    })),
-  ].filter((entry) => (state.mapFilter === "all" || state.mapFilter === entry.type) && (state.mapCategory === "all" || state.mapCategory === entry.item.category_id));
   const drawMarkers = () => {
     mapMarkerLayer?.remove();
     mapMarkerLayer = Leaflet.layerGroup().addTo(leafletMap);
@@ -482,7 +500,7 @@ function selectedItem() {
   return `<div class="listing-detail"><div class="listing-type ${request ? "need" : "help"}">${icon(request ? "request" : "offer")}<span>${translate(state.locale, request ? "Demande de service" : "Offre de service")}</span></div><h2>${escape(item.title)}</h2>${photo}<dl class="listing-facts"><div><dt>Catégorie</dt><dd>${escape(translate(state.locale, item.category_name || "Service"))}</dd></div><div><dt>${translate(state.locale, request ? "Budget" : "Prix")}</dt><dd>${escape(translate(state.locale, pricing.full))}</dd></div><div><dt>Localisation approximative</dt><dd>${escape(item.district)}</dd></div>${item.created_at ? `<div><dt>Publication</dt><dd>${escape(formatDate(item.created_at))}</dd></div>` : ""}</dl><p class="listing-description">${escape(item.description)}</p><div class="listing-author"><span class="conversation-avatar">${escape(initials(identity))}</span><div><small>Publié par</small><strong>${escape(identity || translate(state.locale, "Utilisateur ServiceGO"))}</strong>${!request && item.rating ? `<span>${Number(item.rating).toFixed(1)} / 5 · ${item.review_count || 0} ${translate(state.locale, "avis")}</span>` : ""}</div></div><div class="detail-actions">${actions}</div></div>`;
 }
 function mapView() {
-  return `<main id="main-content" class="workspace premium-map-workspace" tabindex="-1"><section class="map-panel"><div id="liveMap" class="real-map" tabindex="0" aria-label="Carte interactive mondiale. Maintenez appuyé pour créer une demande."></div><button class="map-locate" data-action="locate-me" aria-label="Activer ma localisation">${icon("location")}</button><p class="map-guidance">Pour demander un service, choisissez un emplacement sur la carte et maintenez votre doigt ou votre souris appuyé. Pour proposer votre aide, sélectionnez une bulle de demande et répondez à son auteur. <button data-action="map-create-center">Utiliser le centre de la carte</button></p></section><aside class="panel selection">${selectedItem()}<details class="accessible-list"><summary>Liste accessible</summary>${accessibleMapList()}</details></aside></main>`;
+  return `<main id="main-content" class="workspace premium-map-workspace" tabindex="-1"><section class="map-panel ${state.mapMode === "globe" ? "globe-panel" : ""}"><div class="map-mode-control" role="group" aria-label="Mode de carte"><button class="${state.mapMode === "2d" ? "active" : ""}" data-action="map-mode" data-value="2d">2D</button><button class="${state.mapMode === "globe" ? "active" : ""}" data-action="map-mode" data-value="globe" ${globeSupported() ? "" : "disabled"}>3D</button></div><div id="liveMap" class="real-map ${state.mapMode === "globe" ? "real-globe" : ""}" tabindex="0" aria-label="${state.mapMode === "globe" ? "Globe terrestre interactif. Faites glisser pour tourner et utilisez la molette pour zoomer." : "Carte interactive mondiale. Maintenez appuyé pour créer une demande."}"></div>${state.mapMode === "2d" ? `<button class="map-locate" data-action="locate-me" aria-label="Activer ma localisation">${icon("location")}</button>` : ""}<p class="map-guidance">${state.mapMode === "globe" ? "Explorez le monde en faisant tourner le globe. Sélectionnez une bulle pour ouvrir sa publication." : "Pour demander un service, choisissez un emplacement sur la carte et maintenez votre doigt ou votre souris appuyé. Pour proposer votre aide, sélectionnez une bulle de demande et répondez à son auteur. <button data-action=\"map-create-center\">Utiliser le centre de la carte</button>"}</p></section><aside class="panel selection">${selectedItem()}<details class="accessible-list"><summary>Liste accessible</summary>${accessibleMapList()}</details></aside></main>`;
 }
 function messageContent(message) {
   const type = message.message_type || "text";

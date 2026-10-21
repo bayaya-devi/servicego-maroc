@@ -476,3 +476,10 @@ body[data-space="member"]::after { background-image:radial-gradient(circle,rgba(
 }
 @media (prefers-color-scheme:dark) { .map-guidance { color:#e9f3f7;text-shadow:0 1px 7px rgba(0,0,0,.9) }.messages-page .messages-layout::before,.messages-page .messages-layout::after { opacity:.5 }.profile-privacy { background:rgba(37,133,230,.1) }.message-draft-preview { background:rgba(11,31,46,.78) } }
 @media (prefers-reduced-motion:reduce) { .messages-page .messages-layout::before,.messages-page .messages-layout::after,.message,.conversation,.dashboard-card,.urgent-help-cta,.urgent-help-icon,.urgent-help-icon::after,.modal,.listing-detail,.profile-page,.message-tool.recording,.real-map.is-long-pressing::after { animation:none!important;transition:none!important } }
+.map-mode-control { position:absolute;z-index:900;top:88px;left:50%;display:grid;grid-template-columns:1fr 1fr;transform:translateX(-50%);padding:4px;border:1px solid rgba(255,255,255,.32);border-radius:8px;background:rgba(8,27,38,.62);backdrop-filter:blur(14px) }
+.map-mode-control button { min-width:48px;min-height:36px;border:0;border-radius:6px;background:transparent;color:#fff;font-weight:800 }
+.map-mode-control button.active { background:#fff;color:#102f2a }
+.map-mode-control button:disabled { opacity:.42 }
+.real-globe { background:radial-gradient(circle at 50% 44%,#183d57 0,#071927 48%,#02070d 100%);touch-action:none;cursor:grab }
+.real-globe:active { cursor:grabbing }
+.real-globe canvas { display:block;width:100%;height:100% }

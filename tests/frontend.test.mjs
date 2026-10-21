@@ -312,7 +312,7 @@ test("every static interface label and API message has EN and AR translations", 
     for (const match of worker.matchAll(pattern)) candidates.add(match[1].trim());
   }
   const allowed = new Set([
-    "ServiceGO", "OpenStreetMap", "GO", "FR", "EN", "AR", "2D", "C+", "A/文", "i", "x", "×",
+    "ServiceGO", "OpenStreetMap", "GO", "FR", "EN", "AR", "2D", "3D", "C+", "A/文", "i", "x", "×",
     "6 12 34 56 78", "aetbconseil@gmail.com", "`).join(\"\") : `",
     "` : draft.type === \"video\" ? `", "` : draft.type === \"audio\" ? `",
     "` : current.request_status === \"completed\" ? `", "` : item.status === \"completed\" ? `",
@@ -326,6 +326,18 @@ test("French system copy has no known unaccented spellings", async () => {
   const forbidden = /\b(?:Apercu|Categorie|Completez|Creez|Creer|Ecrire|Menage|Methode|Prenom|Reessayez|Repondre|Reponse|Selection|Telephone|deconnecter|deja|envoyee|etes|meme|reponse|resultat|securisee|utilisee)\b/;
   assert.doesNotMatch(source, forbidden);
   assert.doesNotMatch(worker, forbidden);
+});
+
+test("SG-017 provides an interactive Three.js globe with a reliable 2D fallback", async () => {
+  const [app, globe, packageJson] = await Promise.all([read("public/app.js"), read("public/globe.js"), read("package.json")]);
+  assert.match(packageJson, /"three":/);
+  assert.match(app, /mountGlobe/);
+  assert.match(app, /state\.mapMode = "2d"/);
+  assert.match(globe, /new THREE\.WebGLRenderer/);
+  assert.match(globe, /positionFromCoordinates/);
+  assert.match(globe, /Raycaster/);
+  assert.match(globe, /prefers-reduced-motion: reduce/);
+  assert.match(globe, /renderer\.dispose\(\)/);
 });
 
 test("photo selection is deterministic and falls back internationally", async () => {
