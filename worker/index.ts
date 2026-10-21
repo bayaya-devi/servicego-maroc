@@ -1536,7 +1536,7 @@ export default {
     try {
       const response = withSecurityHeaders(await withApiMetadata(await handleApi(request, env, ctx), request, requestId), request);
       const event = JSON.stringify({ event: "request_completed", requestId, method: request.method, pathname: url.pathname, status: response.status, durationMs: Date.now() - startedAt, environment: env.ENVIRONMENT });
-      if (env.ENVIRONMENT !== "test") {
+      if (String(env.ENVIRONMENT) !== "test") {
         if (response.status >= 500) console.error(event);
         else console.log(event);
       }

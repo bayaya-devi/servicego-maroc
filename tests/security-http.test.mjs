@@ -79,13 +79,24 @@ test.before(async () => {
   assert.deepEqual(errors, [], "The Worker must transpile before security tests run");
 
   miniflare = new Miniflare({
-    script: script.outputText,
-    modules: true,
-    compatibilityDate: "2026-09-19",
-    compatibilityFlags: ["nodejs_compat"],
-    bindings: { APP_NAME: "ServiceGO", APP_CITY: "Maroc", ENVIRONMENT: "test" },
-    d1Databases: { DB: "servicego-security-tests" },
-    kvNamespaces: { UPLOADS: "servicego-security-uploads" },
+    workers: [{
+      config: {
+        name: "servicego-security-tests",
+        compatibilityDate: "2026-09-19",
+        compatibilityFlags: ["nodejs_compat"],
+        manifest: {
+          mainModule: "worker.js",
+          modules: { "worker.js": { type: "esm", contents: script.outputText } },
+        },
+        env: {
+          APP_NAME: { type: "text", value: "ServiceGO" },
+          APP_CITY: { type: "text", value: "Maroc" },
+          ENVIRONMENT: { type: "text", value: "test" },
+          DB: { type: "d1", id: "servicego-security-tests" },
+          UPLOADS: { type: "kv", id: "servicego-security-uploads" },
+        },
+      },
+    }],
   });
   database = await miniflare.getD1Database("DB");
   uploads = await miniflare.getKVNamespace("UPLOADS");
@@ -240,10 +251,14 @@ test("SG-011 rejects forged media and stores validated signatures", async () => 
   await database.prepare("UPDATE profiles SET email_verified = 1 WHERE email = ?").bind(email).run();
   const login = await api("/api/auth/login", { method: "POST", body: { email, password: "Phase1Test!" } });
   const upload = async (bytes, type) => {
-    const form = new FormData();
-    form.set("purpose", "avatar");
-    form.set("file", new File([bytes], "avatar.jpg", { type }));
-    const response = await miniflare.dispatchFetch(`${base}/api/uploads`, { method: "POST", headers: { cookie: login.cookie }, body: form });
+    const boundary = `servicego-${crypto.randomUUID()}`;
+    const body = Buffer.concat([
+      Buffer.from(`--${boundary}\r\nContent-Disposition: form-data; name="purpose"\r\n\r\navatar\r\n`),
+      Buffer.from(`--${boundary}\r\nContent-Disposition: form-data; name="file"; filename="avatar.jpg"\r\nContent-Type: ${type}\r\n\r\n`),
+      Buffer.from(bytes),
+      Buffer.from(`\r\n--${boundary}--\r\n`),
+    ]);
+    const response = await miniflare.dispatchFetch(`${base}/api/uploads`, { method: "POST", headers: { cookie: login.cookie, "content-type": `multipart/form-data; boundary=${boundary}` }, body });
     return { response, json: await response.json() };
   };
   assert.equal((await upload(new TextEncoder().encode("not an image"), "image/jpeg")).response.status, 400);

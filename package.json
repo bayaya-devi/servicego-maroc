@@ -10,6 +10,7 @@
     "test:security": "node --test tests/security-http.test.mjs",
     "test:visual": "node tests/visual-premium.cjs",
     "test:story": "node tests/visual-story-fix.cjs",
+    "test:quality": "node tests/quality-audit.mjs",
     "typecheck": "tsc --noEmit --skipLibCheck --target ES2022 --module ESNext --moduleResolution Bundler --lib ES2022,WebWorker --types ./worker-configuration.d.ts worker/index.ts",
     "check": "wrangler types",
     "types": "wrangler types",
@@ -18,13 +19,20 @@
     "deploy": "wrangler deploy"
   },
   "devDependencies": {
+    "@axe-core/playwright": "^4.14.0",
     "@types/node": "^26.6.2",
-    "miniflare": "3.20250718.3",
+    "chrome-launcher": "^1.2.2",
+    "lighthouse": "^13.5.0",
+    "miniflare": "5.20261019.1-beta",
     "playwright": "^1.64.1",
     "typescript": "^5.9.3",
-    "wrangler": "^4.135.0"
+    "wrangler": "^4.151.3"
   },
   "dependencies": {
     "leaflet": "^1.9.4"
+  },
+  "overrides": {
+    "sharp": "0.35.5",
+    "undici": "7.29.1"
   }
 }

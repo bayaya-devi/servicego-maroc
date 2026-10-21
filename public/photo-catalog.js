@@ -96,7 +96,7 @@ function shuffled(items, random = Math.random) {
   return copy;
 }
 
-export function selectPhotoSet(country, random = Math.random) {
+export function selectPhotoSet(country, random = () => 0.999999) {
   const normalized = String(country || "").toUpperCase();
   let candidates = photoCatalog.filter((photo) => photo.country === normalized);
   if (candidates.length < 2) candidates = photoCatalog.filter((photo) => fallbackCountries.includes(photo.country));
