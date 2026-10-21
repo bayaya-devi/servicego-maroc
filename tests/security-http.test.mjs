@@ -212,6 +212,16 @@ test("SG-007 exposes compatible v1 routes with stable error metadata", async () 
   assert.equal("requestId" in legacy.json, false);
 });
 
+test("SG-009 exposes a dependency readiness probe without private data", async () => {
+  const result = await api("/api/v1/health/ready");
+  assert.equal(result.response.status, 200);
+  assert.equal(result.json.ok, true);
+  assert.deepEqual(result.json.dependencies, { database: "ready", object_store: "ready", email: "not_configured" });
+  assert.equal("users" in result.json, false);
+  assert.equal("email_address" in result.json, false);
+  assert.match(result.response.headers.get("x-request-id"), /^[0-9a-f-]{36}$/i);
+});
+
 test("SG-010 applies the active service quota atomically", async () => {
   const email = "service-quota@example.test";
   await register(email, "Services");

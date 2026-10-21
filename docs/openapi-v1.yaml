@@ -26,6 +26,13 @@ paths:
                   ok: { type: boolean, const: true }
                   city: { type: string }
                   time: { type: string, format: date-time }
+  /health/ready:
+    get:
+      security: []
+      operationId: readiness
+      responses:
+        "200": { description: D1 et stockage objet disponibles }
+        "503": { description: Au moins une dépendance critique est indisponible }
   /auth/register:
     post:
       security: []

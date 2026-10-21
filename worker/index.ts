@@ -679,6 +679,22 @@ async function handleApi(request: Request, env: Env, ctx: ExecutionContext): Pro
   if (authResponse) return authResponse;
 
   if (pathname === "/api/health") return json({ ok: true, city: env.APP_CITY, time: new Date().toISOString() });
+  if (pathname === "/api/health/ready") {
+    try {
+      await Promise.all([
+        env.DB.prepare("SELECT 1 AS ready").first(),
+        env.UPLOADS.get("__servicego_healthcheck__"),
+      ]);
+      return json({
+        ok: true,
+        environment: env.ENVIRONMENT,
+        dependencies: { database: "ready", object_store: "ready", email: emailIsConfigured(env) ? "configured" : "not_configured" },
+        time: new Date().toISOString(),
+      });
+    } catch {
+      return json({ ok: false, dependencies: { database: "unavailable", object_store: "unavailable" }, time: new Date().toISOString() }, 503);
+    }
+  }
   if (pathname === "/api/public-context") {
     const cf = (request as Request & { cf?: { country?: string; region?: string; city?: string } }).cf;
     return json({
@@ -1516,10 +1532,17 @@ export default {
     const url = new URL(request.url);
     if (!url.pathname.startsWith("/api/")) return withSecurityHeaders(await env.ASSETS.fetch(request), request);
     const requestId = text(request.headers.get("cf-ray"), 80) || crypto.randomUUID();
+    const startedAt = Date.now();
     try {
-      return withSecurityHeaders(await withApiMetadata(await handleApi(request, env, ctx), request, requestId), request);
+      const response = withSecurityHeaders(await withApiMetadata(await handleApi(request, env, ctx), request, requestId), request);
+      const event = JSON.stringify({ event: "request_completed", requestId, method: request.method, pathname: url.pathname, status: response.status, durationMs: Date.now() - startedAt, environment: env.ENVIRONMENT });
+      if (env.ENVIRONMENT !== "test") {
+        if (response.status >= 500) console.error(event);
+        else console.log(event);
+      }
+      return response;
     } catch (error) {
-      console.error(JSON.stringify({ event: "request_failed", requestId, method: request.method, pathname: url.pathname, error: error instanceof Error ? error.name : "UnknownError" }));
+      console.error(JSON.stringify({ event: "request_failed", requestId, method: request.method, pathname: url.pathname, status: 500, durationMs: Date.now() - startedAt, environment: env.ENVIRONMENT, error: error instanceof Error ? error.name : "UnknownError" }));
       return withSecurityHeaders(await withApiMetadata(json({ error: "Une erreur est survenue. Réessayez." }, 500), request, requestId), request);
     }
   },
