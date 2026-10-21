@@ -218,13 +218,14 @@ components:
         requestId: { type: string }
     RegisterInput:
       type: object
-      required: [email, password, full_name, district]
+      required: [email, password, full_name, district, accept_terms]
       properties:
         email: { type: string, format: email, maxLength: 254 }
         password: { type: string, minLength: 8, maxLength: 200 }
         full_name: { type: string, minLength: 2, maxLength: 80 }
         phone: { type: string, maxLength: 30 }
         district: { type: string, maxLength: 80 }
+        accept_terms: { type: boolean, const: true }
         turnstile_token: { type: string, maxLength: 2048 }
     NotificationPreferences:
       type: object

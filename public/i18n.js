@@ -1,4 +1,6 @@
 export const translationEntries = [
+  ["Vous devez confirmer avoir au moins 18 ans et accepter les conditions d'utilisation.", "You must confirm that you are at least 18 years old and accept the terms of use.", "يجب أن تؤكد أن عمرك لا يقل عن 18 سنة وأنك توافق على شروط الاستخدام."],
+  ["Je confirme avoir au moins 18 ans et accepter les conditions d'utilisation.", "I confirm that I am at least 18 years old and accept the terms of use.", "أؤكد أن عمري لا يقل عن 18 سنة وأنني أوافق على شروط الاستخدام."],
   ["Préférences de notification invalides.", "Invalid notification preferences.", "تفضيلات الإشعارات غير صالحة."],
   ["Vos préférences de notification ont été enregistrées.", "Your notification preferences have been saved.", "تم حفظ تفضيلات الإشعارات."],
   ["Trop de modifications d'appareils. Réessayez demain.", "Too many device changes. Try again tomorrow.", "تم إجراء تغييرات كثيرة على الأجهزة. حاول مجددًا غدًا."],

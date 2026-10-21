@@ -20,3 +20,7 @@ Avant la commercialisation complète de ServiceGO, le propriétaire doit fournir
 - Politique définitive relative aux cookies et outils de mesure effectivement activés.
 
 Les interfaces publiques doivent continuer à signaler ces éléments comme incomplets tant qu'ils n'ont pas été fournis et validés. Aucune identité, adresse, immatriculation ou promesse contractuelle ne doit être inventée.
+
+## Contrôle technique déjà appliqué
+
+Depuis la version de conditions `2026-10-21`, une inscription est refusée tant que la personne ne confirme pas avoir au moins 18 ans et accepter les conditions d'utilisation. Le serveur enregistre la date et la version acceptée dans le profil. Ce mécanisme fournit une preuve technique versionnée, mais ne remplace pas la validation des textes par un conseil juridique compétent au Maroc.

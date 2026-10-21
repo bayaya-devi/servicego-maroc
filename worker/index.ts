@@ -31,6 +31,7 @@ const newAccountRequestQuota = 3;
 const newAccountRequestQuotaWindowSeconds = 24 * 60 * 60;
 const maxJsonBodyBytes = 64 * 1024;
 const activeServiceQuota = 5;
+const currentTermsVersion = "2026-10-21";
 
 function json(data: unknown, status = 200, headers: HeadersInit = {}): Response {
   const responseHeaders = new Headers(jsonHeaders);
@@ -636,6 +637,7 @@ async function handleAuth(request: Request, env: Env, ctx: ExecutionContext, pat
     const fullName = text(body.full_name, 80) || `${firstName} ${lastName}`.trim();
     const district = text(body.district, 80) || "Non renseignée";
     if (fullName.length < 2) return badRequest("Indiquez votre prénom et votre nom.");
+    if (body.accept_terms !== true) return badRequest("Vous devez confirmer avoir au moins 18 ans et accepter les conditions d'utilisation.");
     if (!(await verifyTurnstile(text(body.turnstile_token, 2048), request, env))) return badRequest("La vérification anti-abus a échoué.");
     const exists = await env.DB.prepare("SELECT id FROM profiles WHERE email = ?").bind(email).first<{ id: string }>();
     if (exists) return json({ error: "Cette adresse e-mail est déjà utilisée. Connectez-vous." }, 409);
@@ -643,8 +645,10 @@ async function handleAuth(request: Request, env: Env, ctx: ExecutionContext, pat
     const splitAt = fullName.indexOf(" ");
     const storedFirstName = firstName || (splitAt > 0 ? fullName.slice(0, splitAt) : fullName);
     const storedLastName = lastName || (splitAt > 0 ? fullName.slice(splitAt + 1) : "");
-    await env.DB.prepare("INSERT INTO profiles (id, email, password_hash, full_name, first_name, last_name, phone, district) VALUES (?, ?, ?, ?, ?, ?, ?, ?)")
-      .bind(id, email, await passwordHash(password), fullName, storedFirstName, storedLastName, text(body.phone, 30) || null, district)
+    await env.DB.prepare(`INSERT INTO profiles
+      (id, email, password_hash, full_name, first_name, last_name, phone, district, terms_accepted_at, terms_version)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, ?)`)
+      .bind(id, email, await passwordHash(password), fullName, storedFirstName, storedLastName, text(body.phone, 30) || null, district, currentTermsVersion)
       .run();
     const sessionId = await createSession(id, env);
     const verificationToken = await createEmailVerification(env, id, email, "signup");

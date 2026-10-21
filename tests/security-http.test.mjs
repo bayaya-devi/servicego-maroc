@@ -62,7 +62,7 @@ async function api(pathname, { cookie, method = "GET", body, headers } = {}) {
   return { response, json, cookie: response.headers.get("set-cookie")?.split(";")[0] };
 }
 async function register(email, name) {
-  const result = await api("/api/auth/register", { method: "POST", headers: { "cf-connecting-ip": `192.0.2.${registrationAddress++}` }, body: { email, password: "Phase1Test!", first_name: name, last_name: "Test", full_name: `${name} Test`, phone: "+212600000000", district: "Rabat" } });
+  const result = await api("/api/auth/register", { method: "POST", headers: { "cf-connecting-ip": `192.0.2.${registrationAddress++}` }, body: { email, password: "Phase1Test!", first_name: name, last_name: "Test", full_name: `${name} Test`, phone: "+212600000000", district: "Rabat", accept_terms: true } });
   assert.equal(result.response.status, 201);
   return result.cookie;
 }
@@ -120,6 +120,16 @@ test("SG-001 enforces the rolling quota with concurrent HTTP requests", async ()
   assert.equal((await api("/api/requests", { cookie: login.cookie, method: "POST", body: requestBody("Still limited") })).response.status, 429);
   await database.prepare("UPDATE service_requests SET created_at = datetime('now', '-25 hours') WHERE requester_id = (SELECT id FROM profiles WHERE email = ?)").bind(email).run();
   assert.equal((await api("/api/requests", { cookie: login.cookie, method: "POST", body: requestBody("Window released") })).response.status, 201);
+});
+
+test("SG-018 requires and records versioned adult terms acceptance", async () => {
+  const refused = await api("/api/auth/register", { method: "POST", headers: { "cf-connecting-ip": "192.0.2.250" }, body: { email: "minor-consent@example.test", password: "Phase1Test!", full_name: "Consent Test", district: "Rabat" } });
+  assert.equal(refused.response.status, 400);
+  assert.equal(refused.json.error, "Vous devez confirmer avoir au moins 18 ans et accepter les conditions d'utilisation.");
+  await register("adult-consent@example.test", "Adult");
+  const consent = await database.prepare("SELECT terms_accepted_at, terms_version FROM profiles WHERE email = ?").bind("adult-consent@example.test").first();
+  assert.ok(consent.terms_accepted_at);
+  assert.equal(consent.terms_version, "2026-10-21");
 });
 
 test("SG-002 rejects cross-account private operations without writes", async () => {
