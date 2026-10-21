@@ -348,8 +348,10 @@ async function consumeRateLimit(env: Env, scope: string, subjectKey: string, lim
 }
 
 async function createNotification(env: Env, userId: string, type: "offer" | "message" | "service_update" | "report_update", title: string, body: string, link?: string): Promise<void> {
-  await env.DB.prepare("INSERT INTO notifications (id, user_id, type, title, body, link) VALUES (?, ?, ?, ?, ?, ?)")
-    .bind(crypto.randomUUID(), userId, type, text(title, 120), text(body, 500), text(link, 300) || null)
+  await env.DB.prepare(`INSERT INTO notifications (id, user_id, type, title, body, link)
+    SELECT ?, ?, ?, ?, ?, ?
+    WHERE COALESCE((SELECT in_app FROM notification_preferences WHERE user_id = ?), 1) = 1`)
+    .bind(crypto.randomUUID(), userId, type, text(title, 120), text(body, 500), text(link, 300) || null, userId)
     .run();
 }
 
@@ -890,6 +892,70 @@ async function handleApi(request: Request, env: Env, ctx: ExecutionContext): Pro
     const placeholders = ids.map(() => "?").join(",");
     await env.DB.prepare(`UPDATE notifications SET read_at = CURRENT_TIMESTAMP WHERE user_id = ? AND id IN (${placeholders})`).bind(user.id, ...ids).run();
     return json({ ok: true });
+  }
+
+  if (pathname === "/api/notification-preferences" && request.method === "GET") {
+    const user = await requireUser(request, env);
+    if (isResponse(user)) return user;
+    const preferences = await env.DB.prepare(
+      "SELECT in_app, email, push, updated_at FROM notification_preferences WHERE user_id = ?",
+    ).bind(user.id).first();
+    return json({ preferences: preferences || { in_app: 1, email: 1, push: 0, updated_at: null } });
+  }
+
+  if (pathname === "/api/notification-preferences" && request.method === "PATCH") {
+    const user = await requireUser(request, env);
+    if (isResponse(user)) return user;
+    const body = await readBody(request);
+    const values = [body?.in_app, body?.email, body?.push];
+    if (values.some((value) => typeof value !== "boolean")) return badRequest("Préférences de notification invalides.");
+    await env.DB.prepare(`INSERT INTO notification_preferences (user_id, in_app, email, push, updated_at)
+      VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)
+      ON CONFLICT(user_id) DO UPDATE SET in_app = excluded.in_app, email = excluded.email,
+        push = excluded.push, updated_at = CURRENT_TIMESTAMP`)
+      .bind(user.id, body.in_app ? 1 : 0, body.email ? 1 : 0, body.push ? 1 : 0)
+      .run();
+    return json({ message: "Vos préférences de notification ont été enregistrées." });
+  }
+
+  if (pathname === "/api/push-subscriptions" && request.method === "POST") {
+    const user = await requireUser(request, env);
+    if (isResponse(user)) return user;
+    const verificationError = requireVerifiedUser(user);
+    if (verificationError) return verificationError;
+    if (!(await consumeRateLimit(env, "push_subscription", user.id, 10, 86400))) {
+      return json({ error: "Trop de modifications d'appareils. Réessayez demain." }, 429);
+    }
+    const body = await readBody(request);
+    const platform = text(body?.platform, 20);
+    const endpoint = text(body?.endpoint, 2000);
+    const p256dh = text(body?.p256dh, 300);
+    const auth = text(body?.auth, 300);
+    const deviceLabel = text(body?.device_label, 80);
+    if (!(["web", "ios", "android"].includes(platform)) || !endpoint.startsWith("https://")) {
+      return badRequest("Abonnement push invalide.");
+    }
+    if (platform === "web" && (!p256dh || !auth)) return badRequest("Clés d'abonnement push manquantes.");
+    const existing = await env.DB.prepare("SELECT id FROM push_subscriptions WHERE user_id = ? AND endpoint = ?")
+      .bind(user.id, endpoint).first<{ id: string }>();
+    const id = existing?.id || crypto.randomUUID();
+    await env.DB.prepare(`INSERT INTO push_subscriptions (id, user_id, platform, endpoint, p256dh, auth, device_label, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+      ON CONFLICT(user_id, endpoint) DO UPDATE SET platform = excluded.platform, p256dh = excluded.p256dh,
+        auth = excluded.auth, device_label = excluded.device_label, updated_at = CURRENT_TIMESTAMP`)
+      .bind(id, user.id, platform, endpoint, p256dh || null, auth || null, deviceLabel || null)
+      .run();
+    return json({ id }, existing ? 200 : 201);
+  }
+
+  const pushSubscriptionMatch = pathname.match(/^\/api\/push-subscriptions\/([0-9a-f-]{36})$/i);
+  if (pushSubscriptionMatch && request.method === "DELETE") {
+    const user = await requireUser(request, env);
+    if (isResponse(user)) return user;
+    const result = await env.DB.prepare("DELETE FROM push_subscriptions WHERE id = ? AND user_id = ?")
+      .bind(pushSubscriptionMatch[1], user.id).run();
+    if (!result.meta.changes) return notFound();
+    return json({ message: "Cet appareil ne recevra plus de notifications." });
   }
 
   if (pathname === "/api/blocks" && request.method === "GET") {

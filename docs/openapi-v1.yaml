@@ -136,6 +136,57 @@ paths:
       operationId: unblockUser
       responses:
         "200": { description: Membre débloqué }
+  /notifications:
+    get:
+      operationId: notifications
+      responses:
+        "200": { description: Cinquante dernières notifications du membre connecté }
+        "401": { $ref: "#/components/responses/Error" }
+  /notifications/read:
+    post:
+      operationId: markNotificationsRead
+      responses:
+        "200": { description: Notifications du membre marquées comme lues }
+        "400": { $ref: "#/components/responses/Error" }
+  /notification-preferences:
+    get:
+      operationId: notificationPreferences
+      responses:
+        "200": { description: Préférences de notification du membre connecté }
+    patch:
+      operationId: updateNotificationPreferences
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/NotificationPreferences" }
+      responses:
+        "200": { description: Préférences enregistrées }
+        "400": { $ref: "#/components/responses/Error" }
+  /push-subscriptions:
+    post:
+      operationId: registerPushSubscription
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/PushSubscriptionInput" }
+      responses:
+        "201": { description: Appareil enregistré }
+        "400": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "429": { $ref: "#/components/responses/Error" }
+  /push-subscriptions/{subscriptionId}:
+    parameters:
+      - in: path
+        name: subscriptionId
+        required: true
+        schema: { type: string, format: uuid }
+    delete:
+      operationId: deletePushSubscription
+      responses:
+        "200": { description: Appareil retiré }
+        "404": { $ref: "#/components/responses/Error" }
   /conversations:
     get:
       operationId: conversations
@@ -175,3 +226,19 @@ components:
         phone: { type: string, maxLength: 30 }
         district: { type: string, maxLength: 80 }
         turnstile_token: { type: string, maxLength: 2048 }
+    NotificationPreferences:
+      type: object
+      required: [in_app, email, push]
+      properties:
+        in_app: { type: boolean }
+        email: { type: boolean }
+        push: { type: boolean }
+    PushSubscriptionInput:
+      type: object
+      required: [platform, endpoint]
+      properties:
+        platform: { type: string, enum: [web, ios, android] }
+        endpoint: { type: string, format: uri, maxLength: 2000 }
+        p256dh: { type: string, maxLength: 300 }
+        auth: { type: string, maxLength: 300 }
+        device_label: { type: string, maxLength: 80 }

@@ -13,6 +13,7 @@ let miniflare;
 let database;
 let uploads;
 let registrationAddress = 10;
+let loginAddress = 100;
 
 function splitSqlStatements(source) {
   const statements = [];
@@ -53,7 +54,10 @@ function splitSqlStatements(source) {
 }
 
 async function api(pathname, { cookie, method = "GET", body, headers } = {}) {
-  const response = await miniflare.dispatchFetch(`${base}${pathname}`, { method, headers: { ...(cookie ? { cookie } : {}), ...(body ? { "content-type": "application/json" } : {}), ...headers }, body: body ? JSON.stringify(body) : undefined });
+  const clientHeaders = pathname === "/api/auth/login" && !headers?.["cf-connecting-ip"]
+    ? { "cf-connecting-ip": `198.51.100.${loginAddress++}` }
+    : {};
+  const response = await miniflare.dispatchFetch(`${base}${pathname}`, { method, headers: { ...clientHeaders, ...(cookie ? { cookie } : {}), ...(body ? { "content-type": "application/json" } : {}), ...headers }, body: body ? JSON.stringify(body) : undefined });
   const json = await response.json().catch(() => ({}));
   return { response, json, cookie: response.headers.get("set-cookie")?.split(";")[0] };
 }
@@ -235,6 +239,28 @@ test("SG-011 rejects forged media and stores validated signatures", async () => 
   assert.equal(cleanup.response.status, 200);
   assert.equal(cleanup.json.deleted, 1);
   assert.equal(await uploads.get(orphanKey), null);
+});
+
+test("SG-013 isolates notification preferences and push subscriptions by account", async () => {
+  const ownerEmail = "notifications-owner@example.test";
+  const otherEmail = "notifications-other@example.test";
+  await register(ownerEmail, "Notify");
+  await register(otherEmail, "Other");
+  await database.prepare("UPDATE profiles SET email_verified = 1 WHERE email IN (?, ?)").bind(ownerEmail, otherEmail).run();
+  const owner = await api("/api/auth/login", { method: "POST", body: { email: ownerEmail, password: "Phase1Test!" } });
+  const other = await api("/api/auth/login", { method: "POST", body: { email: otherEmail, password: "Phase1Test!" } });
+
+  assert.equal((await api("/api/notification-preferences", { cookie: owner.cookie })).json.preferences.in_app, 1);
+  const saved = await api("/api/notification-preferences", { cookie: owner.cookie, method: "PATCH", body: { in_app: false, email: true, push: true } });
+  assert.equal(saved.response.status, 200);
+  assert.equal((await api("/api/notification-preferences", { cookie: owner.cookie })).json.preferences.in_app, 0);
+  assert.equal((await api("/api/notification-preferences", { cookie: owner.cookie, method: "PATCH", body: { in_app: "yes", email: true, push: false } })).response.status, 400);
+
+  const subscription = await api("/api/push-subscriptions", { cookie: owner.cookie, method: "POST", body: { platform: "web", endpoint: "https://push.example.test/member-device", p256dh: "public-key", auth: "auth-secret", device_label: "Navigateur test" } });
+  assert.equal(subscription.response.status, 201);
+  assert.equal((await api(`/api/push-subscriptions/${subscription.json.id}`, { cookie: other.cookie, method: "DELETE" })).response.status, 404);
+  assert.equal((await api(`/api/push-subscriptions/${subscription.json.id}`, { cookie: owner.cookie, method: "DELETE" })).response.status, 200);
+  assert.equal((await api("/api/push-subscriptions", { cookie: owner.cookie, method: "POST", body: { platform: "web", endpoint: "http://insecure.example.test", p256dh: "key", auth: "auth" } })).response.status, 400);
 });
 
 test("SG-014 filters and paginates geographic results", async () => {

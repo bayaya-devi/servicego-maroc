@@ -21,6 +21,8 @@ const state = {
   pendingIntent: null,
   pendingRoute: null,
   conversations: [],
+  notifications: [],
+  notificationPreferences: { in_app: true, email: true, push: false },
   activeConversation: null,
   messages: [],
   mine: { requests: [], services: [] },
@@ -208,6 +210,7 @@ function icon(name) {
     home: '<path d="M3 11.5 12 4l9 7.5"/><path d="M5.5 10.5V20h13v-9.5"/><path d="M9.5 20v-6h5v6"/>',
     user: '<circle cx="12" cy="8" r="4"/><path d="M4.5 21a7.5 7.5 0 0 1 15 0"/>',
     messages: '<path d="M5 18.5 3.5 22l4.5-2h9a4 4 0 0 0 4-4V7a4 4 0 0 0-4-4H7a4 4 0 0 0-4 4v7.5a4 4 0 0 0 2 3.5Z"/><path d="M8 9h8M8 13h5"/>',
+    bell: '<path d="M18 8a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9"/><path d="M10 21h4"/>',
     language: '<circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3a15 15 0 0 1 0 18M12 3a15 15 0 0 0 0 18"/>',
     faq: '<circle cx="12" cy="12" r="9"/><path d="M9.8 9a2.4 2.4 0 1 1 3.5 2.1c-.8.4-1.3 1-1.3 1.9v.4"/><path d="M12 17h.01"/>',
     legal: '<path d="M6 3h9l4 4v14H6z"/><path d="M15 3v5h4M9 12h6M9 16h6"/>',
@@ -252,7 +255,8 @@ function languageMenu() {
 function header() {
   const signedIn = Boolean(state.user);
   if (!signedIn) return `<header class="public-nucleus ${state.publicMenuOpen ? "is-expanded" : ""}"><nav aria-label="Navigation principale"><button class="nucleus-icon" data-action="home" aria-label="Accueil" data-label="Accueil">${icon("home")}</button><button class="nucleus-icon" data-action="open-auth" aria-label="Connexion / Inscription" data-label="Connexion / Inscription">${icon("user")}</button><span class="nucleus-secondary" aria-hidden="${!state.publicMenuOpen}"><button class="nucleus-icon" data-action="open-language" aria-label="Langue" data-label="Langue" tabindex="${state.publicMenuOpen ? "0" : "-1"}">${icon("language")}</button><button class="nucleus-icon" data-action="open-faq" aria-label="Questions fréquentes" data-label="Questions fréquentes" tabindex="${state.publicMenuOpen ? "0" : "-1"}">${icon("faq")}</button><button class="nucleus-icon" data-action="open-legal" aria-label="Informations légales et contact" data-label="Informations légales et contact" tabindex="${state.publicMenuOpen ? "0" : "-1"}">${icon("legal")}</button></span><button class="nucleus-icon plus" data-action="toggle-public-menu" aria-label="${state.publicMenuOpen ? "Fermer" : "Plus"}" aria-expanded="${state.publicMenuOpen}" data-label="${state.publicMenuOpen ? "Fermer" : "Plus"}">${icon(state.publicMenuOpen ? "minus" : "plus")}</button></nav>${languageMenu()}</header>`;
-  return `<header class="public-nucleus member-nucleus ${state.publicMenuOpen ? "is-expanded" : ""}"><nav aria-label="Navigation principale"><button class="nucleus-icon ${state.view === "map" ? "active" : ""}" data-action="view" data-view="map" aria-label="Accueil" data-label="Accueil">${icon("home")}</button><button class="nucleus-icon ${state.view === "messages" ? "active" : ""}" data-action="view" data-view="messages" aria-label="Messages" data-label="Messages">${icon("messages")}</button><button class="nucleus-icon ${state.view === "profile" ? "active" : ""}" data-action="view" data-view="profile" aria-label="Profil" data-label="Profil">${icon("user")}</button><span class="nucleus-secondary member-secondary" aria-hidden="${!state.publicMenuOpen}"><button class="nucleus-icon" data-action="open-legal" aria-label="Informations légales et contact" data-label="Informations légales et contact" tabindex="${state.publicMenuOpen ? "0" : "-1"}">${icon("legal")}</button></span><button class="nucleus-icon plus" data-action="toggle-public-menu" aria-label="${state.publicMenuOpen ? "Fermer" : "Plus"}" aria-expanded="${state.publicMenuOpen}" data-label="${state.publicMenuOpen ? "Fermer" : "Plus"}">${icon(state.publicMenuOpen ? "minus" : "plus")}</button></nav></header>`;
+  const unread = state.notifications.filter((notification) => !notification.read_at).length;
+  return `<header class="public-nucleus member-nucleus ${state.publicMenuOpen ? "is-expanded" : ""}"><nav aria-label="Navigation principale"><button class="nucleus-icon ${state.view === "map" ? "active" : ""}" data-action="view" data-view="map" aria-label="Accueil" data-label="Accueil">${icon("home")}</button><button class="nucleus-icon ${state.view === "messages" ? "active" : ""}" data-action="view" data-view="messages" aria-label="Messages" data-label="Messages">${icon("messages")}</button><button class="nucleus-icon" data-action="open-notifications" aria-label="Notifications" data-label="Notifications">${icon("bell")}${unread ? `<span class="notification-count" aria-label="${unread} ${translate(state.locale, "notifications non lues")}">${unread > 9 ? "9+" : unread}</span>` : ""}</button><button class="nucleus-icon ${state.view === "profile" ? "active" : ""}" data-action="view" data-view="profile" aria-label="Profil" data-label="Profil">${icon("user")}</button><span class="nucleus-secondary member-secondary" aria-hidden="${!state.publicMenuOpen}"><button class="nucleus-icon" data-action="open-legal" aria-label="Informations légales et contact" data-label="Informations légales et contact" tabindex="${state.publicMenuOpen ? "0" : "-1"}">${icon("legal")}</button></span><button class="nucleus-icon plus" data-action="toggle-public-menu" aria-label="${state.publicMenuOpen ? "Fermer" : "Plus"}" aria-expanded="${state.publicMenuOpen}" data-label="${state.publicMenuOpen ? "Fermer" : "Plus"}">${icon(state.publicMenuOpen ? "minus" : "plus")}</button></nav></header>`;
 }
 function staticBubble(kind, label, position, urgent = false) {
   return `<span class="map-bubble ${kind} ${urgent ? "urgent" : ""}" style="${position}">${escape(label)}</span>`;
@@ -598,6 +602,11 @@ function profileModal() {
 function settingsModal() {
   return `<div class="modal-layer"><section class="modal public-modal settings-modal"><button class="button icon outline close" data-action="close-modal" aria-label="Fermer">×</button><p class="eyebrow">ServiceGO</p><h2>Paramètres</h2><section class="settings-section"><h3>Langue</h3><div class="settings-languages" role="group" aria-label="Langue"><button class="${state.locale === "fr" ? "active" : ""}" data-action="set-locale" data-locale="fr">Français</button><button class="${state.locale === "en" ? "active" : ""}" data-action="set-locale" data-locale="en">English</button><button class="${state.locale === "ar" ? "active" : ""}" data-action="set-locale" data-locale="ar">العربية</button></div></section><section class="settings-section"><h3>Compte</h3><button class="button secondary" data-action="open-profile">Modifier mes informations</button><button class="text-button danger-action" data-action="open-delete-account">Supprimer mon compte</button></section></section></div>`;
 }
+function notificationsModal() {
+  const unread = state.notifications.filter((notification) => !notification.read_at);
+  const preferences = state.notificationPreferences;
+  return `<div class="modal-layer"><section class="modal public-modal notifications-modal"><button class="button icon outline close" data-action="close-modal" aria-label="Fermer">×</button><p class="eyebrow">ServiceGO</p><div class="notification-heading"><h2>Notifications</h2>${unread.length ? `<button class="text-button" data-action="mark-notifications-read">Tout marquer comme lu</button>` : ""}</div>${state.notifications.length ? `<div class="notification-list">${state.notifications.map((notification) => `<button class="notification-item ${notification.read_at ? "" : "unread"}" data-action="open-notification" data-id="${escape(notification.id)}" data-link="${escape(notification.link || "")}"><span class="notification-dot" aria-hidden="true"></span><span><strong>${escape(notification.title)}</strong><small>${escape(notification.body)}</small><time>${escape(formatDate(notification.created_at))}</time></span></button>`).join("")}</div>` : `<p class="modal-intro">Vous n'avez aucune notification.</p>`}<form class="notification-preferences" data-form="notification-preferences"><h3>Préférences</h3><label><input type="checkbox" name="in_app" ${preferences.in_app ? "checked" : ""} /> <span>Notifications dans ServiceGO</span></label><label><input type="checkbox" name="email" ${preferences.email ? "checked" : ""} /> <span>Notifications par e-mail</span></label><button class="button secondary" type="submit">Enregistrer les préférences</button></form></section></div>`;
+}
 function deleteAccountModal() {
   return `<div class="modal-layer"><section class="modal public-modal"><button class="button icon outline close" data-action="close-modal" aria-label="Fermer">×</button><p class="eyebrow">Compte</p><h2>Supprimer mon compte</h2><p class="modal-intro">Cette action désactive le compte, supprime vos informations personnelles et vous déconnecte.</p><form class="form-grid" data-form="delete-account"><label class="field full"><span>Mot de passe actuel</span><input name="current_password" type="password" autocomplete="current-password" required /></label><button class="button submit danger-action" type="submit">Supprimer définitivement mon compte</button></form></section></div>`;
 }
@@ -673,6 +682,7 @@ function modal() {
   if (state.modal === "direct") return directModal();
   if (state.modal === "profile") return profileModal();
   if (state.modal === "settings") return settingsModal();
+  if (state.modal === "notifications") return notificationsModal();
   if (state.modal === "delete-account") return deleteAccountModal();
   if (state.modal === "review") return reviewModal();
   if (state.modal === "offers") return offersModal();
@@ -882,6 +892,18 @@ async function loadActivity() {
     state.user.review_count = Number(data.review_count || 0);
   }
 }
+async function loadNotifications() {
+  const [notifications, preferences] = await Promise.all([
+    api("/api/notifications"),
+    api("/api/notification-preferences"),
+  ]);
+  state.notifications = notifications.notifications || [];
+  state.notificationPreferences = {
+    in_app: Boolean(preferences.preferences?.in_app),
+    email: Boolean(preferences.preferences?.email),
+    push: Boolean(preferences.preferences?.push),
+  };
+}
 async function prepareView(view) {
   if (view === "map") await loadMap();
   if (view === "messages") await loadConversations(true);
@@ -922,6 +944,7 @@ async function start() {
       const requestedView = viewForRoute[window.location.pathname];
       state.view = requestedView || "map";
       await prepareView(state.view);
+      await loadNotifications();
       if (!requestedView) window.history.replaceState({ view: state.view }, "", routeForView[state.view]);
     } else if (viewForRoute[window.location.pathname]) {
       state.pendingRoute = viewForRoute[window.location.pathname];
@@ -1120,6 +1143,30 @@ app.addEventListener("click", async (event) => {
       state.modal = "settings";
       render();
     }
+    if (action === "open-notifications") {
+      modalReturnAction = action;
+      await loadNotifications();
+      state.modal = "notifications";
+      render();
+    }
+    if (action === "mark-notifications-read") {
+      const ids = state.notifications.filter((notification) => !notification.read_at).map((notification) => notification.id);
+      if (ids.length) await api("/api/notifications/read", { method: "POST", body: JSON.stringify({ ids }) });
+      await loadNotifications();
+      render();
+    }
+    if (action === "open-notification") {
+      if (button.closest(".notification-item")?.classList.contains("unread")) {
+        await api("/api/notifications/read", { method: "POST", body: JSON.stringify({ ids: [button.dataset.id] }) });
+      }
+      const link = button.dataset.link || "";
+      state.modal = null;
+      await loadNotifications();
+      if (link.startsWith("/app/messages")) {
+        state.activeConversation = new URL(link, window.location.origin).searchParams.get("conversation");
+        await navigateToView("messages");
+      } else render();
+    }
     if (action === "open-delete-account") {
       state.modal = "delete-account";
       render();
@@ -1243,6 +1290,7 @@ app.addEventListener("click", async (event) => {
       state.pendingIntent = null;
       state.pendingRoute = null;
       state.publicMenuOpen = false;
+      state.notifications = [];
       window.history.replaceState({}, "", "/");
       render();
       notify("Vous êtes déconnecté.");
@@ -1351,6 +1399,7 @@ app.addEventListener("submit", async (event) => {
       state.pendingIntent = null;
       state.pendingRoute = null;
       state.modal = null;
+      await loadNotifications();
       await navigateToView("map", { replace: true });
       if (intent === "request") {
         state.selectedMapPoint = leafletMap ? (() => { const center = leafletMap.getCenter(); return { latitude: center.lat, longitude: center.lng }; })() : coordsFromCity(state.user.district);
@@ -1376,6 +1425,7 @@ app.addEventListener("submit", async (event) => {
       state.user = data.user;
       state.resetToken = null;
       state.modal = null;
+      await loadNotifications();
       await navigateToView("map", { replace: true });
       notify(data.message);
     }
@@ -1487,6 +1537,19 @@ app.addEventListener("submit", async (event) => {
       state.modal = null;
       state.selected = null;
       window.history.replaceState({}, "", "/");
+      render();
+      notify(data.message);
+    }
+    if (type === "notification-preferences") {
+      const data = await api("/api/notification-preferences", {
+        method: "PATCH",
+        body: JSON.stringify({
+          in_app: values.in_app === "on",
+          email: values.email === "on",
+          push: state.notificationPreferences.push,
+        }),
+      });
+      await loadNotifications();
       render();
       notify(data.message);
     }

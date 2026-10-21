@@ -25,6 +25,9 @@ Toutes les réponses API contiennent `X-Request-Id`. Les erreurs `/api/v1` ajout
 | POST | `/api/offers/:id/accept` | Mise en relation | Session | Demandeur, transition conditionnelle ouverte -> attribuee |
 | POST | `/api/services/:id/request` | Mise en relation | Session | Membre confirme, service tiers disponible |
 | GET/POST | `/api/conversations/:id/messages` | Messages | Session | Participant uniquement |
+| GET/POST | `/api/notifications`, `/api/notifications/read` | Notifications | Session | Lecture et mise a jour limitees au proprietaire |
+| GET/PATCH | `/api/notification-preferences` | Notifications | Session | Preferences persistantes du proprietaire |
+| POST/DELETE | `/api/push-subscriptions/:id?` | Notifications | Session confirmee | HTTPS, cles Web Push, quota et proprietaire uniquement |
 | POST | `/api/uploads` | Media | Session | Membre confirmé, type/taille/signature binaire, quota |
 | GET | `/api/files/:key` | Media | Session | Proprietaire ou reference autorisee |
 | POST | `/api/admin/uploads/cleanup` | Media | Admin | Nettoyage borné des objets KV orphelins âgés de plus de 24 h |
