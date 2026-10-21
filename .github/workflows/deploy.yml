@@ -35,10 +35,12 @@ jobs:
           secrets: |
             BREVO_API_KEY
             BREVO_FROM_EMAIL
+            TURNSTILE_SITE_KEY
             TURNSTILE_SECRET_KEY
         env:
           BREVO_API_KEY: ${{ secrets.BREVO_API_KEY }}
           BREVO_FROM_EMAIL: ${{ secrets.BREVO_FROM_EMAIL }}
+          TURNSTILE_SITE_KEY: ${{ secrets.TURNSTILE_SITE_KEY }}
           TURNSTILE_SECRET_KEY: ${{ secrets.TURNSTILE_SECRET_KEY }}
       - name: Explain skipped deployment
         if: env.CLOUDFLARE_API_TOKEN == ''

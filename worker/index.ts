@@ -27,6 +27,8 @@ const jsonHeaders = {
 };
 
 const passwordIterations = 100000;
+const newAccountRequestQuota = 3;
+const newAccountRequestQuotaWindowSeconds = 24 * 60 * 60;
 
 function json(data: unknown, status = 200, headers: HeadersInit = {}): Response {
   return new Response(JSON.stringify(data), { status, headers: { ...jsonHeaders, ...headers } });
@@ -42,6 +44,14 @@ function unauthorized(): Response {
 
 function notFound(): Response {
   return json({ error: "Introuvable." }, 404);
+}
+
+function requestQuotaExceeded(): Response {
+  return json({
+    error: "Vous avez atteint votre limite temporaire de publications. Vous pourrez réessayer plus tard. Cette mesure contribue à protéger la communauté ServiceGo.",
+    code: "REQUEST_QUOTA_EXCEEDED",
+    retry_after_seconds: newAccountRequestQuotaWindowSeconds,
+  }, 429, { "retry-after": String(newAccountRequestQuotaWindowSeconds) });
 }
 
 function text(value: unknown, max = 280): string {
@@ -331,10 +341,57 @@ async function verifyTurnstile(token: string, request: Request, env: Env): Promi
   form.set("response", token);
   const ip = request.headers.get("CF-Connecting-IP");
   if (ip) form.set("remoteip", ip);
-  const response = await fetch("https://challenges.cloudflare.com/turnstile/v0/siteverify", { method: "POST", body: form });
-  if (!response.ok) return false;
-  const result = (await response.json()) as { success?: boolean };
-  return result.success === true;
+  try {
+    const response = await fetch("https://challenges.cloudflare.com/turnstile/v0/siteverify", { method: "POST", body: form });
+    if (!response.ok) return false;
+    const result = (await response.json()) as { success?: boolean };
+    return result.success === true;
+  } catch {
+    return false;
+  }
+}
+
+type RequestInsert = {
+  id: string;
+  requesterId: string;
+  targetServiceId?: string | null;
+  categoryId: string;
+  title: string;
+  description: string;
+  district: string;
+  latitude: number;
+  longitude: number;
+  urgency: "normal" | "urgent";
+  budgetHint: string | null;
+  photoKey?: string | null;
+  status?: "open" | "assigned";
+};
+
+/** A single conditional INSERT keeps the rolling quota correct under concurrent requests. */
+async function createQuotaLimitedRequest(env: Env, input: RequestInsert): Promise<boolean> {
+  const result = await env.DB.prepare(
+    `INSERT INTO service_requests
+      (id, requester_id, target_service_id, category_id, title, description, district, latitude, longitude, urgency, budget_hint, photo_key, status)
+     SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+     WHERE (SELECT COUNT(*) FROM service_requests
+            WHERE requester_id = ? AND created_at > datetime('now', '-24 hours')) < ?`,
+  ).bind(
+    input.id, input.requesterId, input.targetServiceId ?? null, input.categoryId, input.title,
+    input.description, input.district, input.latitude, input.longitude, input.urgency, input.budgetHint,
+    input.photoKey ?? null, input.status ?? "open", input.requesterId, newAccountRequestQuota,
+  ).run();
+  return (result.meta.changes ?? 0) === 1;
+}
+
+function withSecurityHeaders(response: Response, request: Request): Response {
+  const headers = new Headers(response.headers);
+  headers.set("x-content-type-options", "nosniff");
+  headers.set("referrer-policy", "strict-origin-when-cross-origin");
+  headers.set("permissions-policy", "camera=(), geolocation=(self), microphone=(self), payment=()");
+  // Leaflet and existing profile imagery generate style attributes. Scripts remain strict; removing this style exception requires a dedicated nonce/hash migration.
+  headers.set("content-security-policy", "default-src 'self'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'; object-src 'none'; script-src 'self' https://challenges.cloudflare.com; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https://tile.openstreetmap.org; font-src 'self' data:; connect-src 'self' https://tile.openstreetmap.org https://challenges.cloudflare.com; frame-src https://challenges.cloudflare.com; media-src 'self' blob:; worker-src 'self' blob:");
+  if (new URL(request.url).protocol === "https:") headers.set("strict-transport-security", "max-age=31536000");
+  return new Response(response.body, { status: response.status, statusText: response.statusText, headers });
 }
 
 async function findOrCreateConversation(env: Env, requestId: string, firstUserId: string, secondUserId: string): Promise<string> {
@@ -514,10 +571,14 @@ async function handleApi(request: Request, env: Env, ctx: ExecutionContext): Pro
     }, 200, { "cache-control": "private, max-age=300" });
   }
   if (pathname === "/api/config") {
-    const mapEnv = env as Env & { MAP_TILE_URL?: string; MAP_ATTRIBUTION?: string };
+    const mapEnv = env as Env & { MAP_TILE_URL?: string; MAP_ATTRIBUTION?: string; TURNSTILE_SECRET_KEY?: string; TURNSTILE_SITE_KEY?: string };
     return json({
       mapTileUrl: mapEnv.MAP_TILE_URL || "https://tile.openstreetmap.org/{z}/{x}/{y}.png",
       mapAttribution: mapEnv.MAP_ATTRIBUTION || '&copy; <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noreferrer">OpenStreetMap</a> contributors',
+      turnstile: {
+        enabled: Boolean(mapEnv.TURNSTILE_SECRET_KEY && mapEnv.TURNSTILE_SITE_KEY),
+        siteKey: mapEnv.TURNSTILE_SECRET_KEY && mapEnv.TURNSTILE_SITE_KEY ? mapEnv.TURNSTILE_SITE_KEY : null,
+      },
     });
   }
   if (pathname === "/api/me" && request.method === "GET") return json({ user: await currentUser(request, env) });
@@ -780,12 +841,11 @@ async function handleApi(request: Request, env: Env, ctx: ExecutionContext): Pro
     const category = await env.DB.prepare("SELECT id FROM categories WHERE id = ?").bind(categoryId).first<{ id: string }>();
     if (!category) return badRequest("Catégorie inconnue.");
     const id = crypto.randomUUID();
-    await env.DB.prepare(
-      `INSERT INTO service_requests (id, requester_id, category_id, title, description, district, latitude, longitude, urgency, budget_hint, photo_key)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-    )
-      .bind(id, user.id, categoryId, title, description, district, latitude, longitude, urgency, text(body.budget_hint, 80) || null, photoKey || null)
-      .run();
+    const created = await createQuotaLimitedRequest(env, {
+      id, requesterId: user.id, categoryId, title, description, district, latitude, longitude, urgency,
+      budgetHint: text(body.budget_hint, 80) || null, photoKey: photoKey || null,
+    });
+    if (!created) return requestQuotaExceeded();
     return json({ id, message: "Votre demande est visible sur la carte." }, 201);
   }
 
@@ -976,12 +1036,12 @@ async function handleApi(request: Request, env: Env, ctx: ExecutionContext): Pro
     const longitude = Number(body.longitude);
     if (description.length < 5 || !validCoordinates(latitude, longitude)) return badRequest("Ajoutez une description et une position valide.");
     const requestId = crypto.randomUUID();
-    await env.DB.prepare(
-      `INSERT INTO service_requests (id, requester_id, target_service_id, category_id, title, description, district, latitude, longitude, urgency, budget_hint, status)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'assigned')`,
-    )
-      .bind(requestId, user.id, service.id, service.category_id, title, description, text(body.district, 80) || "Rabat", latitude, longitude, body.urgency === "urgent" ? "urgent" : "normal", text(body.budget_hint, 80) || null)
-      .run();
+    const created = await createQuotaLimitedRequest(env, {
+      id: requestId, requesterId: user.id, targetServiceId: service.id, categoryId: service.category_id,
+      title, description, district: text(body.district, 80) || "Rabat", latitude, longitude,
+      urgency: body.urgency === "urgent" ? "urgent" : "normal", budgetHint: text(body.budget_hint, 80) || null, status: "assigned",
+    });
+    if (!created) return requestQuotaExceeded();
     const conversationId = await findOrCreateConversation(env, requestId, user.id, service.user_id);
     await env.DB.prepare("INSERT INTO messages (id, conversation_id, sender_id, body) VALUES (?, ?, ?, ?)")
       .bind(crypto.randomUUID(), conversationId, user.id, description)
@@ -1185,13 +1245,13 @@ async function handleApi(request: Request, env: Env, ctx: ExecutionContext): Pro
 export default {
   async fetch(request, env, ctx): Promise<Response> {
     const url = new URL(request.url);
-    if (!url.pathname.startsWith("/api/")) return env.ASSETS.fetch(request);
+    if (!url.pathname.startsWith("/api/")) return withSecurityHeaders(await env.ASSETS.fetch(request), request);
     try {
-      return await handleApi(request, env, ctx);
+      return withSecurityHeaders(await handleApi(request, env, ctx), request);
     } catch (error) {
       const message = error instanceof Error ? error.message : "unknown";
       console.error(JSON.stringify({ event: "api_error", path: url.pathname, message }));
-      return json({ error: "Une erreur est survenue. Réessayez." }, 500);
+      return withSecurityHeaders(json({ error: "Une erreur est survenue. Réessayez." }, 500), request);
     }
   },
 } satisfies ExportedHandler<Env>;

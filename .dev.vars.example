@@ -4,4 +4,6 @@ BREVO_API_KEY=
 BREVO_FROM_EMAIL="aetbconseil@gmail.com"
 
 # Optional: enable Turnstile validation on account creation in production.
+# The site key is public; the secret must only be stored with `wrangler secret put`.
+TURNSTILE_SITE_KEY=
 TURNSTILE_SECRET_KEY=

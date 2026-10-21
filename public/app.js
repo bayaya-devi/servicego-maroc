@@ -53,6 +53,7 @@ let marketingMap = null;
 let modalReturnAction = null;
 let longPressCleanup = null;
 let storyProgressFrame = null;
+let turnstileScriptLoading = null;
 const cities = {
   Casablanca: [33.5731, -7.5898],
   Rabat: [34.0209, -6.8416],
@@ -709,6 +710,43 @@ function render() {
   localizeDom();
   if (state.user && state.view === "map") mountInteractiveMap();
   if (!state.user || state.view === "home") initializeStory();
+  mountTurnstile();
+}
+function mountTurnstile() {
+  const form = document.querySelector('form[data-form="auth"]');
+  if (!form || state.authMode !== "register" || !state.config?.turnstile?.enabled || !state.config.turnstile.siteKey) return;
+  let container = form.querySelector("[data-turnstile-sitekey]");
+  if (!container) {
+    container = document.createElement("div");
+    container.className = "turnstile-field full";
+    container.dataset.turnstileSitekey = "true";
+    container.innerHTML = '<input type="hidden" name="turnstile_token" required />';
+    form.querySelector('[type="submit"]')?.before(container);
+  }
+  const renderWidget = () => {
+    if (!window.turnstile || container.dataset.turnstileMounted === "true") return;
+    container.dataset.turnstileMounted = "true";
+    window.turnstile.render(container, {
+      sitekey: state.config.turnstile.siteKey,
+      theme: "auto",
+      callback: (token) => { const input = container.querySelector('input[name="turnstile_token"]'); if (input) input.value = token; },
+      "expired-callback": () => { const input = container.querySelector('input[name="turnstile_token"]'); if (input) input.value = ""; },
+      "error-callback": () => { const input = container.querySelector('input[name="turnstile_token"]'); if (input) input.value = ""; },
+    });
+  };
+  if (window.turnstile) return renderWidget();
+  if (!turnstileScriptLoading) {
+    turnstileScriptLoading = new Promise((resolve, reject) => {
+      const script = document.createElement("script");
+      script.src = "https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit";
+      script.async = true;
+      script.defer = true;
+      script.onload = resolve;
+      script.onerror = reject;
+      document.head.append(script);
+    });
+  }
+  turnstileScriptLoading.then(renderWidget).catch(() => {});
 }
 function closeModal() {
   if (state.modal === "auth") state.pendingIntent = null;

@@ -92,6 +92,43 @@ test("Forteresse rate-limits sensitive email flows and keeps CI type-safe", asyn
   assert.match(workflow, /npm run typecheck/);
 });
 
+test("Phase 1 enforces an atomic rolling request quota and preserves cancelled publications", async () => {
+  const [worker, migration, i18n] = await Promise.all([
+    read("worker/index.ts"),
+    read("migrations/0008_phase1_request_quota.sql"),
+    read("public/i18n.js"),
+  ]);
+  assert.match(migration, /CREATE INDEX IF NOT EXISTS service_requests_requester_created_idx/);
+  assert.match(worker, /function createQuotaLimitedRequest/);
+  assert.match(worker, /INSERT INTO service_requests[\s\S]*SELECT \?, \?, \?, \?, \?, \?, \?, \?, \?, \?, \?, \?, \?/);
+  assert.match(worker, /COUNT\(\*\) FROM service_requests[\s\S]*created_at > datetime\('now', '-24 hours'\)/);
+  assert.match(worker, /newAccountRequestQuota = 3/);
+  assert.match(worker, /REQUEST_QUOTA_EXCEEDED/);
+  assert.match(worker, /retry-after/);
+  assert.match(worker, /createQuotaLimitedRequest\(env, \{/);
+  assert.match(i18n, /You have reached your temporary publishing limit/);
+  assert.match(i18n, /لقد وصلت إلى حد النشر المؤقت/);
+});
+
+test("Phase 1 security headers and adaptive Turnstile controls are configured", async () => {
+  const [worker, headers, source, workflow] = await Promise.all([
+    read("worker/index.ts"),
+    read("public/_headers"),
+    read("public/app.js"),
+    read(".github/workflows/deploy.yml"),
+  ]);
+  for (const header of ["Content-Security-Policy", "Strict-Transport-Security", "X-Content-Type-Options", "Referrer-Policy", "Permissions-Policy"]) {
+    assert.match(headers, new RegExp(header));
+  }
+  assert.match(worker, /withSecurityHeaders/);
+  assert.match(worker, /script-src 'self' https:\/\/challenges\.cloudflare\.com/);
+  assert.match(worker, /TURNSTILE_SECRET_KEY && mapEnv\.TURNSTILE_SITE_KEY/);
+  assert.match(source, /mountTurnstile/);
+  assert.match(source, /turnstile_token/);
+  assert.match(source, /challenges\.cloudflare\.com\/turnstile/);
+  assert.match(workflow, /TURNSTILE_SITE_KEY/);
+});
+
 test("deployment targets the active branch and D1 database", async () => {
   const workflow = await read(".github/workflows/deploy.yml");
   assert.match(workflow, /branches: \[master\]/);
