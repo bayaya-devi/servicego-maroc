@@ -9,6 +9,7 @@
     "APP_CITY": "Maroc",
     "ENVIRONMENT": "production",
     "BREVO_FROM_NAME": "ServiceGo — A&B TECHNOLOGIES",
+    "TURNSTILE_SITE_KEY": "0x4AAAAAAFfMyzaGeNmxjO1k",
     "MAP_TILE_URL": "https://tile.openstreetmap.org/{z}/{x}/{y}.png",
     "MAP_ATTRIBUTION": "&copy; <a href=\"https://www.openstreetmap.org/copyright\" target=\"_blank\" rel=\"noreferrer\">OpenStreetMap</a> contributors"
   },
@@ -44,6 +45,7 @@
         "APP_CITY": "Maroc",
         "ENVIRONMENT": "staging",
         "BREVO_FROM_NAME": "ServiceGo — A&B TECHNOLOGIES",
+        "TURNSTILE_SITE_KEY": "0x4AAAAAAFfMyzaGeNmxjO1k",
         "MAP_TILE_URL": "https://tile.openstreetmap.org/{z}/{x}/{y}.png",
         "MAP_ATTRIBUTION": "&copy; <a href=\"https://www.openstreetmap.org/copyright\" target=\"_blank\" rel=\"noreferrer\">OpenStreetMap</a> contributors"
       },
