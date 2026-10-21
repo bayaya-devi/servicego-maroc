@@ -11,6 +11,7 @@ const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const base = "http://servicego.test";
 let miniflare;
 let database;
+let registrationAddress = 10;
 
 function splitSqlStatements(source) {
   const statements = [];
@@ -50,13 +51,13 @@ function splitSqlStatements(source) {
   return statements;
 }
 
-async function api(pathname, { cookie, method = "GET", body } = {}) {
-  const response = await miniflare.dispatchFetch(`${base}${pathname}`, { method, headers: { ...(cookie ? { cookie } : {}), ...(body ? { "content-type": "application/json" } : {}) }, body: body ? JSON.stringify(body) : undefined });
+async function api(pathname, { cookie, method = "GET", body, headers } = {}) {
+  const response = await miniflare.dispatchFetch(`${base}${pathname}`, { method, headers: { ...(cookie ? { cookie } : {}), ...(body ? { "content-type": "application/json" } : {}), ...headers }, body: body ? JSON.stringify(body) : undefined });
   const json = await response.json().catch(() => ({}));
   return { response, json, cookie: response.headers.get("set-cookie")?.split(";")[0] };
 }
 async function register(email, name) {
-  const result = await api("/api/auth/register", { method: "POST", body: { email, password: "Phase1Test!", first_name: name, last_name: "Test", full_name: `${name} Test`, phone: "+212600000000", district: "Rabat" } });
+  const result = await api("/api/auth/register", { method: "POST", headers: { "cf-connecting-ip": `192.0.2.${registrationAddress++}` }, body: { email, password: "Phase1Test!", first_name: name, last_name: "Test", full_name: `${name} Test`, phone: "+212600000000", district: "Rabat" } });
   assert.equal(result.response.status, 201);
   return result.cookie;
 }
@@ -148,4 +149,32 @@ test("SG-004 resets a password with a single-use token and revokes previous sess
   assert.equal((await api("/api/auth/login", { method: "POST", body: { email, password: "Phase1Test!" } })).response.status, 401);
   assert.equal((await api("/api/auth/login", { method: "POST", body: { email, password: "NewPhase1!" } })).response.status, 200);
   assert.equal((await api("/api/auth/reset-password", { method: "POST", body: { token, password: "AnotherPass1!" } })).response.status, 400);
+});
+
+test("SG-006 blocks new offers and messages in both directions", async () => {
+  const ownerEmail = "block-owner@example.test";
+  const providerEmail = "block-provider@example.test";
+  await register(ownerEmail, "Owner");
+  await register(providerEmail, "Provider");
+  await database.prepare("UPDATE profiles SET email_verified = 1 WHERE email IN (?, ?)").bind(ownerEmail, providerEmail).run();
+  const owner = await api("/api/auth/login", { method: "POST", body: { email: ownerEmail, password: "Phase1Test!" } });
+  const provider = await api("/api/auth/login", { method: "POST", body: { email: providerEmail, password: "Phase1Test!" } });
+  const ownerId = (await api("/api/me", { cookie: owner.cookie })).json.user.id;
+  const providerId = (await api("/api/me", { cookie: provider.cookie })).json.user.id;
+  const created = await api("/api/requests", { cookie: owner.cookie, method: "POST", body: requestBody("Blocked request") });
+
+  assert.equal((await api(`/api/blocks/${ownerId}`, { cookie: provider.cookie, method: "POST" })).response.status, 201);
+  const refusedOffer = await api(`/api/requests/${created.json.id}/offers`, { cookie: provider.cookie, method: "POST", body: { message: "Je peux vous aider." } });
+  assert.equal(refusedOffer.response.status, 403);
+  assert.equal(refusedOffer.json.code, "USER_BLOCKED");
+  assert.equal((await api(`/api/blocks/${ownerId}`, { cookie: provider.cookie, method: "DELETE" })).response.status, 200);
+
+  const offer = await api(`/api/requests/${created.json.id}/offers`, { cookie: provider.cookie, method: "POST", body: { message: "Je peux vous aider." } });
+  assert.equal(offer.response.status, 201);
+  assert.equal((await api(`/api/blocks/${providerId}`, { cookie: owner.cookie, method: "POST" })).response.status, 201);
+  const refusedMessage = await api(`/api/conversations/${offer.json.conversation_id}/messages`, { cookie: provider.cookie, method: "POST", body: { body: "Message interdit" } });
+  assert.equal(refusedMessage.response.status, 403);
+  assert.equal(refusedMessage.json.code, "USER_BLOCKED");
+  const blockedList = await api("/api/blocks", { cookie: owner.cookie });
+  assert.equal(blockedList.json.blocks.some((item) => item.id === providerId), true);
 });

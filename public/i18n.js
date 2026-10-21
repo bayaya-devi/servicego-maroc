@@ -1,4 +1,12 @@
 export const translationEntries = [
+  ["Membre invalide.", "Invalid member.", "عضو غير صالح."],
+  ["Cette interaction n'est pas disponible.", "This interaction is unavailable.", "هذا التفاعل غير متاح."],
+  ["Ce membre peut de nouveau vous contacter.", "This member can contact you again.", "يمكن لهذا العضو التواصل معك مجددًا."],
+  ["Ce membre ne peut plus interagir avec vous.", "This member can no longer interact with you.", "لم يعد بإمكان هذا العضو التفاعل معك."],
+  ["Bloquer", "Block", "حظر"],
+  ["Débloquer", "Unblock", "إلغاء الحظر"],
+  ["Membre bloqué", "Blocked member", "عضو محظور"],
+  ["Débloquez ce membre pour reprendre la conversation.", "Unblock this member to resume the conversation.", "ألغِ حظر هذا العضو لاستئناف المحادثة."],
   ["Vous avez atteint votre limite temporaire de publications. Vous pourrez réessayer plus tard. Cette mesure contribue à protéger la communauté ServiceGo.", "You have reached your temporary publishing limit. Please try again later. This measure helps protect the ServiceGo community.", "لقد وصلت إلى حد النشر المؤقت. يرجى المحاولة لاحقًا. يساهم هذا الإجراء في حماية مجتمع ServiceGo."],
   ["Pour demander un service, choisissez un emplacement sur la carte et maintenez votre doigt ou votre souris appuyé. Pour proposer votre aide, sélectionnez une bulle de demande et répondez à son auteur.", "To request a service, choose a location on the map and press and hold with your finger or mouse. To offer help, select a request bubble and reply to its author.", "لطلب خدمة، اختر موقعًا على الخريطة واضغط مطولًا بإصبعك أو الفأرة. لعرض المساعدة، اختر فقاعة طلب ورد على صاحبها."],
   ["Publier une position approximative pour protéger l'adresse exacte.", "Publish an approximate location to protect the exact address.", "نشر موقع تقريبي لحماية العنوان الدقيق."],

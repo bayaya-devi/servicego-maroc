@@ -54,6 +54,10 @@ function requestQuotaExceeded(): Response {
   }, 429, { "retry-after": String(newAccountRequestQuotaWindowSeconds) });
 }
 
+function blockedInteraction(): Response {
+  return json({ error: "Cette interaction n'est pas disponible.", code: "USER_BLOCKED" }, 403);
+}
+
 function text(value: unknown, max = 280): string {
   return typeof value === "string" ? value.trim().slice(0, max) : "";
 }
@@ -303,6 +307,15 @@ async function createNotification(env: Env, userId: string, type: "offer" | "mes
   await env.DB.prepare("INSERT INTO notifications (id, user_id, type, title, body, link) VALUES (?, ?, ?, ?, ?, ?)")
     .bind(crypto.randomUUID(), userId, type, text(title, 120), text(body, 500), text(link, 300) || null)
     .run();
+}
+
+async function usersAreBlocked(env: Env, firstUserId: string, secondUserId: string): Promise<boolean> {
+  const row = await env.DB.prepare(
+    `SELECT 1 AS blocked FROM user_blocks
+     WHERE (blocker_id = ? AND blocked_id = ?) OR (blocker_id = ? AND blocked_id = ?)
+     LIMIT 1`,
+  ).bind(firstUserId, secondUserId, secondUserId, firstUserId).first<{ blocked: number }>();
+  return Boolean(row);
 }
 
 async function createPasswordReset(env: Env, userId: string): Promise<string> {
@@ -597,16 +610,24 @@ async function handleApi(request: Request, env: Env, ctx: ExecutionContext): Pro
                 r.urgency, r.budget_hint, r.photo_key, r.status, r.created_at,
                 c.name AS category_name, c.icon AS category_icon, p.full_name AS requester_name
          FROM service_requests r JOIN categories c ON c.id = r.category_id JOIN profiles p ON p.id = r.requester_id
-         WHERE r.status = 'open' ORDER BY r.urgency DESC, r.created_at DESC LIMIT 100`,
-      ).all(),
+         WHERE r.status = 'open'
+           AND NOT EXISTS (SELECT 1 FROM user_blocks b WHERE
+             (b.blocker_id = ? AND b.blocked_id = r.requester_id) OR
+             (b.blocker_id = r.requester_id AND b.blocked_id = ?))
+         ORDER BY r.urgency DESC, r.created_at DESC LIMIT 100`,
+      ).bind(user.id, user.id).all(),
       env.DB.prepare(
         `SELECT s.id, s.user_id, s.category_id, s.title, s.description, s.district,
                 ROUND(s.latitude, 2) AS latitude, ROUND(s.longitude, 2) AS longitude,
                 s.price_hint, s.available, s.created_at,
                 c.name AS category_name, c.icon AS category_icon, p.full_name, p.rating, p.review_count
          FROM user_services s JOIN categories c ON c.id = s.category_id JOIN profiles p ON p.id = s.user_id
-         WHERE s.available = 1 AND p.is_active = 1 ORDER BY s.created_at DESC LIMIT 100`,
-      ).all(),
+         WHERE s.available = 1 AND p.is_active = 1
+           AND NOT EXISTS (SELECT 1 FROM user_blocks b WHERE
+             (b.blocker_id = ? AND b.blocked_id = s.user_id) OR
+             (b.blocker_id = s.user_id AND b.blocked_id = ?))
+         ORDER BY s.created_at DESC LIMIT 100`,
+      ).bind(user.id, user.id).all(),
     ]);
     return json({ requests: requests.results, services: services.results, city: env.APP_CITY });
   }
@@ -735,6 +756,33 @@ async function handleApi(request: Request, env: Env, ctx: ExecutionContext): Pro
     const placeholders = ids.map(() => "?").join(",");
     await env.DB.prepare(`UPDATE notifications SET read_at = CURRENT_TIMESTAMP WHERE user_id = ? AND id IN (${placeholders})`).bind(user.id, ...ids).run();
     return json({ ok: true });
+  }
+
+  if (pathname === "/api/blocks" && request.method === "GET") {
+    const user = await requireUser(request, env);
+    if (isResponse(user)) return user;
+    const { results } = await env.DB.prepare(
+      `SELECT p.id, p.full_name, p.avatar_url, b.created_at
+       FROM user_blocks b JOIN profiles p ON p.id = b.blocked_id
+       WHERE b.blocker_id = ? ORDER BY b.created_at DESC`,
+    ).bind(user.id).all();
+    return json({ blocks: results });
+  }
+
+  const blockMatch = pathname.match(/^\/api\/blocks\/([^/]+)$/);
+  if (blockMatch && (request.method === "POST" || request.method === "DELETE")) {
+    const user = await requireUser(request, env);
+    if (isResponse(user)) return user;
+    const targetId = text(decodeURIComponent(blockMatch[1]), 80);
+    if (!targetId || targetId === user.id) return badRequest("Membre invalide.");
+    if (request.method === "DELETE") {
+      await env.DB.prepare("DELETE FROM user_blocks WHERE blocker_id = ? AND blocked_id = ?").bind(user.id, targetId).run();
+      return json({ message: "Ce membre peut de nouveau vous contacter." });
+    }
+    const target = await env.DB.prepare("SELECT id FROM profiles WHERE id = ? AND is_active = 1").bind(targetId).first<{ id: string }>();
+    if (!target) return notFound();
+    await env.DB.prepare("INSERT OR IGNORE INTO user_blocks (blocker_id, blocked_id) VALUES (?, ?)").bind(user.id, target.id).run();
+    return json({ message: "Ce membre ne peut plus interagir avec vous." }, 201);
   }
 
   if (pathname === "/api/reports" && request.method === "POST") {
@@ -958,7 +1006,6 @@ async function handleApi(request: Request, env: Env, ctx: ExecutionContext): Pro
     if (isResponse(user)) return user;
     const verificationError = requireVerifiedUser(user);
     if (verificationError) return verificationError;
-    if (!(await consumeRateLimit(env, "offer", user.id, 20, 3600))) return json({ error: "Trop de tentatives. Réessayez dans une heure." }, 429);
     const body = await readBody(request);
     if (!body) return badRequest("Informations invalides.");
     const requestItem = await env.DB.prepare("SELECT id, requester_id, title FROM service_requests WHERE id = ? AND status = 'open'")
@@ -966,6 +1013,8 @@ async function handleApi(request: Request, env: Env, ctx: ExecutionContext): Pro
       .first<{ id: string; requester_id: string; title: string }>();
     if (!requestItem) return notFound();
     if (requestItem.requester_id === user.id) return badRequest("Vous ne pouvez pas répondre à votre propre demande.");
+    if (await usersAreBlocked(env, user.id, requestItem.requester_id)) return blockedInteraction();
+    if (!(await consumeRateLimit(env, "offer", user.id, 20, 3600))) return json({ error: "Trop de tentatives. Réessayez dans une heure." }, 429);
     const message = text(body.message, 1000);
     if (message.length < 3) return badRequest("Écrivez une courte réponse.");
     const id = crypto.randomUUID();
@@ -1004,6 +1053,7 @@ async function handleApi(request: Request, env: Env, ctx: ExecutionContext): Pro
       .bind(acceptMatch[1])
       .first<{ id: string; request_id: string; provider_id: string; requester_id: string; title: string }>();
     if (!offer || offer.requester_id !== user.id) return notFound();
+    if (await usersAreBlocked(env, offer.requester_id, offer.provider_id)) return blockedInteraction();
     const claim = await env.DB.prepare(
       "UPDATE service_requests SET status = 'assigned', updated_at = CURRENT_TIMESTAMP WHERE id = ? AND requester_id = ? AND status = 'open'",
     ).bind(offer.request_id, user.id).run();
@@ -1030,6 +1080,7 @@ async function handleApi(request: Request, env: Env, ctx: ExecutionContext): Pro
       .first<{ id: string; user_id: string; category_id: string; title: string }>();
     if (!service) return notFound();
     if (service.user_id === user.id) return badRequest("C'est votre propre service.");
+    if (await usersAreBlocked(env, user.id, service.user_id)) return blockedInteraction();
     const title = text(body.title, 100) || `Besoin: ${service.title}`;
     const description = text(body.description, 1200);
     const latitude = Number(body.latitude);
@@ -1129,6 +1180,10 @@ async function handleApi(request: Request, env: Env, ctx: ExecutionContext): Pro
     if (isResponse(user)) return user;
     const { results } = await env.DB.prepare(
       `SELECT c.id, c.request_id, c.updated_at, r.title AS request_title, r.status AS request_status,
+       CASE WHEN c.user_a_id = ? THEN c.user_b_id ELSE c.user_a_id END AS other_user_id,
+       CASE WHEN EXISTS (SELECT 1 FROM user_blocks b WHERE b.blocker_id = ? AND
+         ((c.user_a_id = ? AND b.blocked_id = c.user_b_id) OR (c.user_b_id = ? AND b.blocked_id = c.user_a_id)))
+         THEN 1 ELSE 0 END AS blocked_by_me,
        CASE WHEN c.user_a_id = ? THEN p_b.full_name ELSE p_a.full_name END AS other_name,
        CASE WHEN c.user_a_id = ? THEN p_b.avatar_url ELSE p_a.avatar_url END AS other_avatar_url,
        (SELECT CASE m.message_type WHEN 'image' THEN 'Image' WHEN 'video' THEN 'Vidéo' WHEN 'audio' THEN 'Message vocal' WHEN 'location' THEN 'Localisation' ELSE m.body END FROM messages m WHERE m.conversation_id = c.id ORDER BY m.created_at DESC LIMIT 1) AS last_message,
@@ -1138,7 +1193,7 @@ async function handleApi(request: Request, env: Env, ctx: ExecutionContext): Pro
        LEFT JOIN service_requests r ON r.id = c.request_id
        WHERE c.user_a_id = ? OR c.user_b_id = ? ORDER BY c.updated_at DESC`,
     )
-      .bind(user.id, user.id, user.id, user.id, user.id, user.id)
+      .bind(user.id, user.id, user.id, user.id, user.id, user.id, user.id, user.id, user.id, user.id)
       .all();
     return json({ conversations: results });
   }
@@ -1147,9 +1202,9 @@ async function handleApi(request: Request, env: Env, ctx: ExecutionContext): Pro
   if (messagesMatch) {
     const user = await requireUser(request, env);
     if (isResponse(user)) return user;
-    const conversation = await env.DB.prepare("SELECT id FROM conversations WHERE id = ? AND (user_a_id = ? OR user_b_id = ?)")
+    const conversation = await env.DB.prepare("SELECT id, user_a_id, user_b_id FROM conversations WHERE id = ? AND (user_a_id = ? OR user_b_id = ?)")
       .bind(messagesMatch[1], user.id, user.id)
-      .first<{ id: string }>();
+      .first<{ id: string; user_a_id: string; user_b_id: string }>();
     if (!conversation) return notFound();
     if (request.method === "GET") {
       const { results } = await env.DB.prepare(
@@ -1170,6 +1225,8 @@ async function handleApi(request: Request, env: Env, ctx: ExecutionContext): Pro
     if (request.method === "POST") {
       const verificationError = requireVerifiedUser(user);
       if (verificationError) return verificationError;
+      const otherUserId = conversation.user_a_id === user.id ? conversation.user_b_id : conversation.user_a_id;
+      if (await usersAreBlocked(env, user.id, otherUserId)) return blockedInteraction();
       if (!(await consumeRateLimit(env, "message", `${user.id}:${conversation.id}`, 60, 60))) return json({ error: "Trop de messages. Réessayez dans une minute." }, 429);
       const body = await readBody(request);
       const message = text(body?.body, 2000);
