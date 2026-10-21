@@ -1,7 +1,7 @@
 # Leave these blank to run the complete local product flow without email delivery.
-# Add them only after Resend has verified the sending domain.
-RESEND_API_KEY=
-RESEND_FROM_EMAIL="ServiceGo — A&B TECHNOLOGIES <bonjour@your-domain.com>"
+# Add them only after Brevo has verified the sender address.
+BREVO_API_KEY=
+BREVO_FROM_EMAIL="aetbconseil@gmail.com"
 
 # Optional: enable Turnstile validation on account creation in production.
 TURNSTILE_SECRET_KEY=

@@ -1,33 +1,33 @@
-# E-mails transactionnels ServiceGo
+# E-mails transactionnels ServiceGo avec Brevo
 
 Date de contrôle : 21 octobre 2026.
 
 ## État constaté
 
-Le Worker `servicego-maroc` ne possède actuellement aucun secret d'envoi listé par Cloudflare. Aucun expéditeur Resend ou Brevo, ni domaine vérifié, n'est donc vérifiable depuis ce dépôt. Les parcours de vérification et de réinitialisation restent volontairement indisponibles tant que cette configuration externe n'est pas fournie : ils ne simulent pas un envoi.
+Le Worker `servicego-maroc` ne possède actuellement aucun secret d'envoi listé par Cloudflare. Aucun expéditeur Brevo vérifié ni clé API n'est donc utilisable depuis le Worker. Les parcours de vérification et de réinitialisation restent volontairement indisponibles tant que cette configuration externe n'est pas fournie : ils ne simulent pas un envoi.
 
-Le fournisseur retenu par le code est **Resend**, déjà intégré au Worker. Aucun deuxième fournisseur n'est activé.
+Le fournisseur retenu par le code est **Brevo**. Resend n'est plus utilisé par le Worker.
 
 ## Configuration requise
 
-1. Créer ou ouvrir le compte Resend de l'éditeur A&B TECHNOLOGIES, sans souscrire d'offre payante sans validation préalable.
-2. Ajouter un domaine réellement contrôlé par l'éditeur dans Resend et suivre la validation DNS proposée par Resend (SPF et DKIM ; DMARC recommandé). Ne modifier aucun enregistrement existant sans en vérifier l'impact.
-3. Attendre la confirmation de Resend : le domaine et l'adresse d'expédition ne sont pas considérés comme vérifiés avant cette étape.
-4. Créer une clé API Resend limitée à l'envoi transactionnel.
+1. Ouvrir le compte Brevo de l'éditeur A&B TECHNOLOGIES, sans souscrire d'offre payante.
+2. Ajouter l'expéditeur `ServiceGo — A&B TECHNOLOGIES <aetbconseil@gmail.com>` dans **Senders, domains, IPs**, puis confirmer le lien reçu dans cette boîte Gmail.
+3. L'absence de domaine personnel est admise, mais l'expéditeur Gmail n'est pas un domaine authentifié. Brevo peut remplacer l'adresse affichée pour certains destinataires afin de respecter les règles Gmail/Yahoo/Microsoft. Ne pas modifier les DNS de `gmail.com` ni de `workers.dev`.
+4. Créer une clé API Brevo dédiée à ServiceGo dans **SMTP & API > API keys & MCP**.
 5. Depuis le dépôt, saisir les secrets sans les copier dans Git ni dans `.dev.vars` :
 
 ```powershell
-npx wrangler secret put RESEND_API_KEY --name servicego-maroc
-npx wrangler secret put RESEND_FROM_EMAIL --name servicego-maroc
+npx wrangler secret put BREVO_API_KEY --name servicego-maroc
+npx wrangler secret put BREVO_FROM_EMAIL --name servicego-maroc
 ```
 
-Pour `RESEND_FROM_EMAIL`, utiliser une valeur autorisée par Resend, par exemple :
+Pour `BREVO_FROM_EMAIL`, utiliser l'adresse d'expédition vérifiée par Brevo :
 
 ```text
-ServiceGo — A&B TECHNOLOGIES <bonjour@votre-domaine.tld>
+aetbconseil@gmail.com
 ```
 
-`aetbconseil@gmail.com` demeure le `Reply-To` et le contact confidentialité officiel ; ce n'est pas automatiquement une adresse d'expédition Resend autorisée.
+`aetbconseil@gmail.com` demeure le `Reply-To` et le contact confidentialité officiel. Son utilisation comme expéditeur est autorisée seulement après la confirmation Brevo.
 
 ## Parcours couverts
 
@@ -44,6 +44,6 @@ Les modèles HTML et texte sont intégrés en français, anglais et arabe (RTL).
 2. Créer un compte de test avec une boîte accessible, vérifier la réception et suivre le lien sur desktop et mobile.
 3. Tester un renvoi, un lien expiré, un lien déjà utilisé et une adresse inexistante.
 4. Tester une réinitialisation : réception, modification du mot de passe, connexion avec le nouveau mot de passe et rejet de l'ancien lien.
-5. Conserver seulement les identifiants techniques d'envoi fournis par Resend dans les journaux Cloudflare, jamais le lien complet ni le jeton.
+5. Conserver seulement les identifiants techniques d'envoi fournis par Brevo dans les journaux Cloudflare, jamais le lien complet ni le jeton.
 
-Tant que ces étapes ne sont pas réalisées avec un domaine et une boîte réellement accessibles, le statut reste **bloqué**, et non « opérationnel ».
+Tant que ces étapes ne sont pas réalisées avec une boîte réellement accessible, le statut reste **bloqué**, et non « opérationnel ».

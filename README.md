@@ -26,7 +26,7 @@ ServiceGO doit utiliser Cloudflare autant que possible :
 - Cloudflare WAF, cache et rate limiting pour la protection.
 - Cloudflare Analytics/Logs pour le suivi technique.
 
-Auth : Cloudflare ne fournit pas une authentification marketplace grand public cle en main. Le MVP utilise donc une auth custom dans Workers avec D1, sessions HTTP-only, hashing de mot de passe, confirmation d'email Resend et Turnstile.
+Auth : Cloudflare ne fournit pas une authentification marketplace grand public cle en main. Le MVP utilise donc une auth custom dans Workers avec D1, sessions HTTP-only, hashing de mot de passe, confirmation d'e-mail Brevo et Turnstile.
 
 ## Application fonctionnelle
 
@@ -37,7 +37,7 @@ Le projet contient maintenant une application Workers deployable :
 - carte Leaflet interactive avec marqueurs bleus pour les besoins et verts pour les services ;
 - reponse a une demande, demande directe a un prestataire, messagerie et acceptation d'offre via l'API ;
 - ajout d'une photo vers Cloudflare R2 des que le stockage est active sur le compte Cloudflare ;
-- confirmation d'email a la creation, renvoi de lien, et changement d'adresse par lien Resend ;
+- confirmation d'e-mail à la création, renvoi de lien, et changement d'adresse par lien Brevo ;
 - workflow GitHub Actions pour appliquer les migrations et deployer.
 
 ## Demarrage local
@@ -59,10 +59,10 @@ npx wrangler dev --local --port 8788
 1. Se connecter a Cloudflare avec `npx wrangler login`.
 2. Creer les ressources : `npx wrangler d1 create servicego-db` et `npx wrangler r2 bucket create servicego-uploads`.
 3. Copier l'identifiant D1 renvoye par Cloudflare dans `wrangler.jsonc` a la place de `00000000-0000-0000-0000-000000000000`.
-4. Dans Resend, vérifier le domaine d'envoi puis choisir une adresse autorisée au format `ServiceGo — A&B TECHNOLOGIES <bonjour@votre-domaine.tld>`. Ne pas utiliser `aetbconseil@gmail.com` comme expéditeur tant que Resend ne l'autorise pas ; elle reste l'adresse de réponse officielle.
-5. Configurer les secrets : `npx wrangler secret put RESEND_API_KEY` et `npx wrangler secret put RESEND_FROM_EMAIL`. Ajouter `TURNSTILE_SECRET_KEY` lorsque Turnstile est active.
+4. Dans Brevo, ajouter puis vérifier l'expéditeur `ServiceGo — A&B TECHNOLOGIES <aetbconseil@gmail.com>`. Sans domaine personnel, Brevo peut substituer une adresse conforme pour certains destinataires ; ne pas déclarer le domaine Gmail comme authentifié.
+5. Configurer les secrets : `npx wrangler secret put BREVO_API_KEY` et `npx wrangler secret put BREVO_FROM_EMAIL`. Ajouter `TURNSTILE_SECRET_KEY` lorsque Turnstile est active.
 6. Appliquer la base distante avec `npm run db:remote`, puis deployer avec `npm run deploy`.
-7. Pour GitHub Actions, ajouter `CLOUDFLARE_API_TOKEN`, `CLOUDFLARE_ACCOUNT_ID`, `RESEND_API_KEY`, `RESEND_FROM_EMAIL` et `TURNSTILE_SECRET_KEY` dans les secrets du depot.
+7. Pour GitHub Actions, ajouter `CLOUDFLARE_API_TOKEN`, `CLOUDFLARE_ACCOUNT_ID`, `BREVO_API_KEY`, `BREVO_FROM_EMAIL` et `TURNSTILE_SECRET_KEY` dans les secrets du dépôt.
 
 Les liens de confirmation expirent au bout de 24 heures et les liens de réinitialisation au bout d'une heure. Tant qu'une adresse n'est pas confirmée, le compte peut se connecter mais ne peut ni publier, ni répondre, ni lancer une discussion. Cela limite les faux comptes sans créer deux types d'utilisateurs. Consultez aussi [la procédure e-mail](docs/EMAIL_DELIVERY_SETUP.md).
 

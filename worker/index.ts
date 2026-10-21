@@ -226,24 +226,34 @@ function transactionalEmail(locale: Locale, kind: "verify_signup" | "verify_emai
 }
 
 function emailIsConfigured(env: Env): boolean {
-  const mailEnv = env as Env & { RESEND_API_KEY?: string; RESEND_FROM_EMAIL?: string };
-  return Boolean(mailEnv.RESEND_API_KEY && mailEnv.RESEND_FROM_EMAIL);
+  const mailEnv = env as Env & { BREVO_API_KEY?: string; BREVO_FROM_EMAIL?: string };
+  return Boolean(mailEnv.BREVO_API_KEY && mailEnv.BREVO_FROM_EMAIL);
 }
 
 async function sendEmail(env: Env, recipient: string, content: EmailContent): Promise<boolean> {
-  const apiKey = (env as Env & { RESEND_API_KEY?: string }).RESEND_API_KEY;
-  const from = (env as Env & { RESEND_FROM_EMAIL?: string }).RESEND_FROM_EMAIL;
+  const mailEnv = env as Env & { BREVO_API_KEY?: string; BREVO_FROM_EMAIL?: string; BREVO_FROM_NAME?: string };
+  const apiKey = mailEnv.BREVO_API_KEY;
+  const from = mailEnv.BREVO_FROM_EMAIL;
+  const fromName = mailEnv.BREVO_FROM_NAME || "ServiceGo — A&B TECHNOLOGIES";
   if (!apiKey || !from) return false;
   try {
-    const response = await fetch("https://api.resend.com/emails", {
+    const response = await fetch("https://api.brevo.com/v3/smtp/email", {
       method: "POST",
-      headers: { authorization: `Bearer ${apiKey}`, "content-type": "application/json" },
-      body: JSON.stringify({ from, to: [recipient], reply_to: "aetbconseil@gmail.com", subject: content.subject, html: content.html, text: content.text }),
+      headers: { accept: "application/json", "api-key": apiKey, "content-type": "application/json" },
+      body: JSON.stringify({
+        sender: { name: fromName, email: from },
+        to: [{ email: recipient }],
+        replyTo: { name: "A&B TECHNOLOGIES", email: "aetbconseil@gmail.com" },
+        subject: content.subject,
+        htmlContent: content.html,
+        textContent: content.text,
+        tags: ["servicego", "transactional"],
+      }),
     });
-    if (!response.ok) console.warn(JSON.stringify({ event: "resend_rejected", status: response.status }));
+    if (!response.ok) console.warn(JSON.stringify({ event: "brevo_rejected", status: response.status }));
     return response.ok;
   } catch {
-    console.warn(JSON.stringify({ event: "resend_unreachable" }));
+    console.warn(JSON.stringify({ event: "brevo_unreachable" }));
     return false;
   }
 }
