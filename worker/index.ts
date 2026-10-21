@@ -585,10 +585,14 @@ async function handleApi(request: Request, env: Env, ctx: ExecutionContext): Pro
     if (newPassword.length < 8) return badRequest("Le nouveau mot de passe doit comporter au moins 8 caractères.");
     const account = await env.DB.prepare("SELECT password_hash FROM profiles WHERE id = ?").bind(user.id).first<{ password_hash: string }>();
     if (!account || !(await passwordMatches(currentPassword, account.password_hash))) return json({ error: "Mot de passe actuel incorrect." }, 401);
-    await env.DB.prepare("UPDATE profiles SET password_hash = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?")
-      .bind(await passwordHash(newPassword), user.id)
-      .run();
-    return json({ ok: true });
+    const sessionId = crypto.randomUUID();
+    await env.DB.batch([
+      env.DB.prepare("UPDATE profiles SET password_hash = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?")
+        .bind(await passwordHash(newPassword), user.id),
+      env.DB.prepare("DELETE FROM sessions WHERE user_id = ?").bind(user.id),
+      env.DB.prepare("INSERT INTO sessions (id, user_id, expires_at) VALUES (?, ?, datetime('now', '+30 days'))").bind(sessionId, user.id),
+    ]);
+    return json({ ok: true }, 200, { "set-cookie": sessionCookie(sessionId, request) });
   }
 
   if (pathname === "/api/me/email" && request.method === "POST") {
@@ -605,6 +609,9 @@ async function handleApi(request: Request, env: Env, ctx: ExecutionContext): Pro
     const account = await env.DB.prepare("SELECT password_hash FROM profiles WHERE id = ?").bind(user.id).first<{ password_hash: string }>();
     if (!account || !(await passwordMatches(currentPassword, account.password_hash))) return json({ error: "Mot de passe actuel incorrect." }, 401);
     if (!emailIsConfigured(env)) return json({ error: "La modification d'adresse e-mail est temporairement indisponible : le service d'envoi n'est pas configuré." }, 503);
+    if (!(await consumeRateLimit(env, "email_change", user.id, 3, 3600))) {
+      return json({ error: "Trop de tentatives. Réessayez dans une heure." }, 429);
+    }
     const token = await createEmailVerification(env, user.id, nextEmail, "change_email");
     const accepted = await sendVerificationEmail(env, nextEmail, user.full_name, token, new URL(request.url).origin, "change_email", preferredLocale(request));
     if (!accepted) {
@@ -638,6 +645,9 @@ async function handleApi(request: Request, env: Env, ctx: ExecutionContext): Pro
     if (isResponse(user)) return user;
     if (user.email_verified) return badRequest("Votre adresse est déjà confirmée.");
     if (!emailIsConfigured(env)) return json({ error: "L'envoi d'e-mails n'est pas encore configuré." }, 503);
+    if (!(await consumeRateLimit(env, "resend_verification", user.id, 3, 3600))) {
+      return json({ error: "Trop de tentatives. Réessayez dans une heure." }, 429);
+    }
     const token = await createEmailVerification(env, user.id, user.email, "signup");
     const accepted = await sendVerificationEmail(env, user.email, user.full_name, token, new URL(request.url).origin, "signup", preferredLocale(request));
     if (!accepted) {
@@ -929,15 +939,18 @@ async function handleApi(request: Request, env: Env, ctx: ExecutionContext): Pro
     if (verificationError) return verificationError;
     const offer = await env.DB.prepare(
       `SELECT o.id, o.request_id, o.provider_id, r.requester_id, r.title
-       FROM offers o JOIN service_requests r ON r.id = o.request_id WHERE o.id = ? AND o.status = 'pending'`,
+       FROM offers o JOIN service_requests r ON r.id = o.request_id WHERE o.id = ? AND o.status = 'pending' AND r.status = 'open'`,
     )
       .bind(acceptMatch[1])
       .first<{ id: string; request_id: string; provider_id: string; requester_id: string; title: string }>();
     if (!offer || offer.requester_id !== user.id) return notFound();
+    const claim = await env.DB.prepare(
+      "UPDATE service_requests SET status = 'assigned', updated_at = CURRENT_TIMESTAMP WHERE id = ? AND requester_id = ? AND status = 'open'",
+    ).bind(offer.request_id, user.id).run();
+    if ((claim.meta.changes ?? 0) !== 1) return json({ error: "Cette demande n'est plus disponible." }, 409);
     await env.DB.batch([
       env.DB.prepare("UPDATE offers SET status = 'accepted' WHERE id = ?").bind(offer.id),
       env.DB.prepare("UPDATE offers SET status = 'declined' WHERE request_id = ? AND id <> ? AND status = 'pending'").bind(offer.request_id, offer.id),
-      env.DB.prepare("UPDATE service_requests SET status = 'assigned', updated_at = CURRENT_TIMESTAMP WHERE id = ?").bind(offer.request_id),
     ]);
     const conversationId = await findOrCreateConversation(env, offer.request_id, user.id, offer.provider_id);
     await createNotification(env, offer.provider_id, "service_update", "Réponse acceptée", `Votre réponse à « ${offer.title} » a été acceptée.`, `/app/messages?conversation=${conversationId}`);

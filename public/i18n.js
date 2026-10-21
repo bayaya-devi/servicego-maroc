@@ -346,6 +346,7 @@ export const translationEntries = [
   ["Vous ne pouvez pas répondre à votre propre demande.", "You cannot reply to your own request.", "لا يمكنك الرد على طلبك."],
   ["Écrivez une courte réponse.", "Write a short reply.", "اكتب ردًا قصيرًا."],
   ["Vous avez déjà répondu à cette demande.", "You have already replied to this request.", "لقد رددت على هذا الطلب من قبل."],
+  ["Cette demande n'est plus disponible.", "This request is no longer available.", "هذا الطلب لم يعد متاحًا."],
   ["C'est votre propre service.", "This is your own service.", "هذه خدمتك."],
   ["Ajoutez une description et une position au Maroc.", "Add a description and a location in Morocco.", "أضف وصفًا وموقعًا في المغرب."],
   ["Écrivez un message.", "Write a message.", "اكتب رسالة."],

@@ -72,6 +72,26 @@ test("the operational map requires a session and rounds coordinates", async () =
   assert.match(route, /ROUND\(s\.longitude, 2\)/);
 });
 
+test("Forteresse guards session rotation and concurrent offer acceptance", async () => {
+  const worker = await read("worker/index.ts");
+  const passwordRoute = worker.slice(worker.indexOf('pathname === "/api/me/password"'), worker.indexOf('pathname === "/api/me/email"'));
+  const acceptanceRoute = worker.slice(worker.indexOf('const acceptMatch'), worker.indexOf('const serviceRequestMatch'));
+  assert.match(passwordRoute, /DELETE FROM sessions WHERE user_id = \?/);
+  assert.match(passwordRoute, /INSERT INTO sessions \(id, user_id, expires_at\)/);
+  assert.match(passwordRoute, /set-cookie.*sessionCookie\(sessionId, request\)/s);
+  assert.match(acceptanceRoute, /r\.status = 'open'/);
+  assert.match(acceptanceRoute, /UPDATE service_requests SET status = 'assigned'[\s\S]*status = 'open'/);
+  assert.match(acceptanceRoute, /claim\.meta\.changes/);
+  assert.match(acceptanceRoute, /Cette demande n'est plus disponible\./);
+});
+
+test("Forteresse rate-limits sensitive email flows and keeps CI type-safe", async () => {
+  const [worker, workflow] = await Promise.all([read("worker/index.ts"), read(".github/workflows/deploy.yml")]);
+  assert.match(worker, /consumeRateLimit\(env, "email_change", user\.id, 3, 3600\)/);
+  assert.match(worker, /consumeRateLimit\(env, "resend_verification", user\.id, 3, 3600\)/);
+  assert.match(workflow, /npm run typecheck/);
+});
+
 test("deployment targets the active branch and D1 database", async () => {
   const workflow = await read(".github/workflows/deploy.yml");
   assert.match(workflow, /branches: \[master\]/);
