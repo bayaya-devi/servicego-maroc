@@ -16,7 +16,7 @@ Toutes les réponses API contiennent `X-Request-Id`. Les erreurs `/api/v1` ajout
 | GET/PATCH/DELETE | `/api/me` | Compte | Session | Proprietaire uniquement |
 | POST | `/api/me/password` | Compte | Session | Mot de passe courant, rotation des sessions |
 | POST | `/api/me/email` | Compte | Session | Mot de passe courant, 3/h, confirmation par e-mail |
-| GET | `/api/map` | Geo | Session | Positions arrondies, maximum 100 elements |
+| GET | `/api/map` | Geo | Session | Positions arrondies, catégorie, bounding box, limite 1-100 et curseurs séparés |
 | GET/POST | `/api/requests` | Demandes | Session | Lecture proprietaire, e-mail confirme pour creer |
 | PATCH/DELETE | `/api/requests/:id` | Demandes | Session | Proprietaire et demande ouverte |
 | GET/POST | `/api/services` | Services | Session | Lecture proprietaire, e-mail confirme pour creer |

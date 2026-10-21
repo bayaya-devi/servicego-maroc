@@ -66,6 +66,20 @@ function text(value: unknown, max = 280): string {
   return typeof value === "string" ? value.trim().slice(0, max) : "";
 }
 
+function encodeCursor(value: number | null | undefined): string | null {
+  return value ? btoa(String(value)).replaceAll("=", "") : null;
+}
+
+function decodeCursor(value: string | null): number | null {
+  if (!value) return null;
+  try {
+    const decoded = Number(atob(value));
+    return Number.isSafeInteger(decoded) && decoded > 0 ? decoded : null;
+  } catch {
+    return null;
+  }
+}
+
 function validEmail(value: string): boolean {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value) && value.length <= 254;
 }
@@ -688,33 +702,68 @@ async function handleApi(request: Request, env: Env, ctx: ExecutionContext): Pro
   if (pathname === "/api/map" && request.method === "GET") {
     const user = await requireUser(request, env);
     if (isResponse(user)) return user;
+    const limit = Math.min(100, Math.max(1, Number.parseInt(url.searchParams.get("limit") || "100", 10) || 100));
+    const category = text(url.searchParams.get("category"), 60);
+    const requestCursor = decodeCursor(url.searchParams.get("request_cursor"));
+    const serviceCursor = decodeCursor(url.searchParams.get("service_cursor"));
+    const bboxValues = ["min_lat", "max_lat", "min_lng", "max_lng"].map((key) => url.searchParams.get(key));
+    const hasBboxParameter = bboxValues.some((value) => value !== null);
+    const bbox = bboxValues.map((value) => Number(value));
+    const hasValidBbox = bboxValues.every((value) => value !== null) && bbox.every(Number.isFinite)
+      && bbox[0] >= -85.051129 && bbox[1] <= 85.051129 && bbox[2] >= -180 && bbox[3] <= 180
+      && bbox[0] < bbox[1] && bbox[2] < bbox[3];
+    if (hasBboxParameter && !hasValidBbox) return badRequest("Zone géographique invalide.");
+    if (url.searchParams.has("request_cursor") && !requestCursor) return badRequest("Curseur de demande invalide.");
+    if (url.searchParams.has("service_cursor") && !serviceCursor) return badRequest("Curseur de service invalide.");
+
+    const requestFilters = ["r.status = 'open'", `NOT EXISTS (SELECT 1 FROM user_blocks b WHERE
+      (b.blocker_id = ? AND b.blocked_id = r.requester_id) OR
+      (b.blocker_id = r.requester_id AND b.blocked_id = ?))`];
+    const serviceFilters = ["s.available = 1", "p.is_active = 1", `NOT EXISTS (SELECT 1 FROM user_blocks b WHERE
+      (b.blocker_id = ? AND b.blocked_id = s.user_id) OR
+      (b.blocker_id = s.user_id AND b.blocked_id = ?))`];
+    const requestParameters: Array<string | number> = [user.id, user.id];
+    const serviceParameters: Array<string | number> = [user.id, user.id];
+    if (category) { requestFilters.push("r.category_id = ?"); serviceFilters.push("s.category_id = ?"); requestParameters.push(category); serviceParameters.push(category); }
+    if (hasValidBbox) {
+      requestFilters.push("r.latitude BETWEEN ? AND ?", "r.longitude BETWEEN ? AND ?");
+      serviceFilters.push("s.latitude BETWEEN ? AND ?", "s.longitude BETWEEN ? AND ?");
+      requestParameters.push(...bbox); serviceParameters.push(...bbox);
+    }
+    if (requestCursor) { requestFilters.push("r.rowid < ?"); requestParameters.push(requestCursor); }
+    if (serviceCursor) { serviceFilters.push("s.rowid < ?"); serviceParameters.push(serviceCursor); }
+    requestParameters.push(limit); serviceParameters.push(limit);
     const [requests, services] = await Promise.all([
       env.DB.prepare(
-        `SELECT r.id, r.requester_id, r.category_id, r.title, r.description, r.district,
+        `SELECT r.rowid AS cursor_id, r.id, r.requester_id, r.category_id, r.title, r.description, r.district,
                 ROUND(r.latitude, 2) AS latitude, ROUND(r.longitude, 2) AS longitude,
                 r.urgency, r.budget_hint, r.photo_key, r.status, r.created_at,
                 c.name AS category_name, c.icon AS category_icon, p.full_name AS requester_name
          FROM service_requests r JOIN categories c ON c.id = r.category_id JOIN profiles p ON p.id = r.requester_id
-         WHERE r.status = 'open'
-           AND NOT EXISTS (SELECT 1 FROM user_blocks b WHERE
-             (b.blocker_id = ? AND b.blocked_id = r.requester_id) OR
-             (b.blocker_id = r.requester_id AND b.blocked_id = ?))
-         ORDER BY r.urgency DESC, r.created_at DESC LIMIT 100`,
-      ).bind(user.id, user.id).all(),
+         WHERE ${requestFilters.join(" AND ")}
+         ORDER BY r.rowid DESC LIMIT ?`,
+      ).bind(...requestParameters).all(),
       env.DB.prepare(
-        `SELECT s.id, s.user_id, s.category_id, s.title, s.description, s.district,
+        `SELECT s.rowid AS cursor_id, s.id, s.user_id, s.category_id, s.title, s.description, s.district,
                 ROUND(s.latitude, 2) AS latitude, ROUND(s.longitude, 2) AS longitude,
                 s.price_hint, s.available, s.created_at,
                 c.name AS category_name, c.icon AS category_icon, p.full_name, p.rating, p.review_count
          FROM user_services s JOIN categories c ON c.id = s.category_id JOIN profiles p ON p.id = s.user_id
-         WHERE s.available = 1 AND p.is_active = 1
-           AND NOT EXISTS (SELECT 1 FROM user_blocks b WHERE
-             (b.blocker_id = ? AND b.blocked_id = s.user_id) OR
-             (b.blocker_id = s.user_id AND b.blocked_id = ?))
-         ORDER BY s.created_at DESC LIMIT 100`,
-      ).bind(user.id, user.id).all(),
+         WHERE ${serviceFilters.join(" AND ")}
+         ORDER BY s.rowid DESC LIMIT ?`,
+      ).bind(...serviceParameters).all(),
     ]);
-    return json({ requests: requests.results, services: services.results, city: env.APP_CITY });
+    const requestRows = requests.results as Array<Record<string, unknown> & { cursor_id: number }>;
+    const serviceRows = services.results as Array<Record<string, unknown> & { cursor_id: number }>;
+    return json({
+      requests: requestRows.map(({ cursor_id: _cursor, ...item }) => item),
+      services: serviceRows.map(({ cursor_id: _cursor, ...item }) => item),
+      city: env.APP_CITY,
+      pagination: {
+        request_cursor: requestRows.length === limit ? encodeCursor(requestRows.at(-1)?.cursor_id) : null,
+        service_cursor: serviceRows.length === limit ? encodeCursor(serviceRows.at(-1)?.cursor_id) : null,
+      },
+    });
   }
 
   if (pathname === "/api/me" && request.method === "PATCH") {

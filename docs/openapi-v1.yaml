@@ -77,6 +77,15 @@ paths:
   /map:
     get:
       operationId: mapListings
+      parameters:
+        - { in: query, name: category, schema: { type: string, maxLength: 60 } }
+        - { in: query, name: min_lat, schema: { type: number, minimum: -85.051129 } }
+        - { in: query, name: max_lat, schema: { type: number, maximum: 85.051129 } }
+        - { in: query, name: min_lng, schema: { type: number, minimum: -180 } }
+        - { in: query, name: max_lng, schema: { type: number, maximum: 180 } }
+        - { in: query, name: limit, schema: { type: integer, minimum: 1, maximum: 100, default: 100 } }
+        - { in: query, name: request_cursor, schema: { type: string } }
+        - { in: query, name: service_cursor, schema: { type: string } }
       responses:
         "200": { description: Demandes et services visibles avec coordonnées arrondies }
         "401": { $ref: "#/components/responses/Error" }

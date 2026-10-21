@@ -1,4 +1,7 @@
 export const translationEntries = [
+  ["Zone géographique invalide.", "Invalid geographic area.", "النطاق الجغرافي غير صالح."],
+  ["Curseur de demande invalide.", "Invalid request cursor.", "مؤشر الطلب غير صالح."],
+  ["Curseur de service invalide.", "Invalid service cursor.", "مؤشر الخدمة غير صالح."],
   ["Vous pouvez afficher jusqu'à cinq services simultanément.", "You can display up to five services at once.", "يمكنك عرض ما يصل إلى خمس خدمات في الوقت نفسه."],
   ["Le contenu du fichier ne correspond pas à son format.", "The file content does not match its format.", "لا يتطابق محتوى الملف مع تنسيقه."],
   ["Membre invalide.", "Invalid member.", "عضو غير صالح."],

@@ -236,3 +236,23 @@ test("SG-011 rejects forged media and stores validated signatures", async () => 
   assert.equal(cleanup.json.deleted, 1);
   assert.equal(await uploads.get(orphanKey), null);
 });
+
+test("SG-014 filters and paginates geographic results", async () => {
+  const email = "geo@example.test";
+  await register(email, "Geo");
+  await database.prepare("UPDATE profiles SET email_verified = 1 WHERE email = ?").bind(email).run();
+  const login = await api("/api/auth/login", { method: "POST", body: { email, password: "Phase1Test!" } });
+  for (const [title, latitude] of [["Geo north", 34.05], ["Geo south", 33.95]]) {
+    const created = await api("/api/requests", { cookie: login.cookie, method: "POST", body: { ...requestBody(title), category_id: "jardinage", latitude } });
+    assert.equal(created.response.status, 201);
+  }
+  const first = await api("/api/map?category=jardinage&min_lat=33&max_lat=35&min_lng=-8&max_lng=-5&limit=1", { cookie: login.cookie });
+  assert.equal(first.response.status, 200);
+  assert.equal(first.json.requests.length, 1);
+  assert.ok(first.json.pagination.request_cursor);
+  const second = await api(`/api/map?category=jardinage&min_lat=33&max_lat=35&min_lng=-8&max_lng=-5&limit=1&request_cursor=${encodeURIComponent(first.json.pagination.request_cursor)}`, { cookie: login.cookie });
+  assert.equal(second.response.status, 200);
+  assert.equal(second.json.requests.length, 1);
+  assert.notEqual(second.json.requests[0].id, first.json.requests[0].id);
+  assert.equal((await api("/api/map?min_lat=35", { cookie: login.cookie })).response.status, 400);
+});
