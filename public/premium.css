@@ -338,7 +338,8 @@ body[data-space="member"]::after { opacity: .28; }
 
 /* Mobile: bottom sheets and thumb-first surfaces, not a scaled desktop. */
 @media (max-width: 760px) {
-  .public-nucleus { top: 10px; }
+  .public-nucleus:not(.member-nucleus) { top: 10px; bottom: auto; }
+  .public-nucleus:not(.member-nucleus) .language-nucleus { top: calc(100% + 10px); bottom: auto; }
   .public-nucleus nav { min-height: 56px; padding: 5px; }
   .member-nucleus { top: auto; bottom: max(10px, env(safe-area-inset-bottom)); }
   .narrative { padding-top: 82px; }

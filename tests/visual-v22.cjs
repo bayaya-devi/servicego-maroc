@@ -33,11 +33,16 @@ async function capture(page, prefix, name) {
 
 async function mockMemberApis(page) {
   await page.route("**/api/me", (route) => route.fulfill({ json: { user: testUser } }));
+  await page.route("**/api/config", (route) => route.fulfill({ json: { turnstile: { enabled: false }, mapTileUrl: "https://tile.openstreetmap.org/{z}/{x}/{y}.png", mapAttribution: "OpenStreetMap" } }));
+  await page.route("**/api/public-context", (route) => route.fulfill({ json: { country: "MA", region: "Rabat-Salé-Kénitra", city: "Rabat", source: "test" } }));
   await page.route("**/api/map", (route) => route.fulfill({ json: { requests: [], services: [] } }));
   await page.route("**/api/categories", (route) => route.fulfill({ json: { categories: [{ id: "cat-1", name: "Plomberie", icon: "tool" }] } }));
   await page.route("**/api/conversations", (route) => route.fulfill({ json: { conversations: [] } }));
   await page.route("**/api/requests", (route) => route.fulfill({ json: { requests: [] } }));
   await page.route("**/api/services", (route) => route.fulfill({ json: { services: [] } }));
+  await page.route("**/api/activity", (route) => route.fulfill({ json: { replied: [], reviews: [], rating: 5, review_count: 0 } }));
+  await page.route("**/api/notifications", (route) => route.fulfill({ json: { notifications: [] } }));
+  await page.route("**/api/notification-preferences", (route) => route.fulfill({ json: { preferences: { in_app: true, email: true, push: false } } }));
   await page.route("**/api/auth/logout", (route) => route.fulfill({ json: { ok: true } }));
 }
 
@@ -51,10 +56,18 @@ async function assertViewport(page, label) {
 }
 
 async function publicSuite(browser, prefix, viewport, locale, colorScheme) {
-  const page = await browser.newPage({ viewport, colorScheme, reducedMotion: "no-preference" });
+  const context = await browser.newContext({ viewport, colorScheme, reducedMotion: "no-preference", isMobile: viewport.width <= 760, hasTouch: viewport.width <= 760 });
+  const page = await context.newPage();
   const errors = [];
+  const selectWithTouch = async (selector) => {
+    const control = page.locator(selector);
+    if (viewport.width <= 760) await control.tap();
+    else await control.click();
+  };
   page.on("pageerror", (error) => errors.push(error.message));
-  await page.addInitScript((value) => localStorage.setItem("servicego-locale", value), locale);
+  await page.addInitScript((value) => {
+    if (!localStorage.getItem("servicego-locale")) localStorage.setItem("servicego-locale", value);
+  }, locale);
   await page.goto(baseUrl, { waitUntil: "networkidle" });
   await assertViewport(page, `${prefix} public`);
 
@@ -81,10 +94,23 @@ async function publicSuite(browser, prefix, viewport, locale, colorScheme) {
   assert.deepEqual(minusStyle, plusStyle, `${prefix}: plus and minus styles differ`);
   await capture(page, prefix, "04-noyau-public-ouvert");
 
-  await page.locator('[data-action="open-language"]').click();
+  await selectWithTouch('[data-action="open-language"]');
   assert.ok(await page.locator(".language-nucleus").isVisible(), `${prefix}: language nucleus missing`);
+  const languageMenuBounds = await page.locator(".language-nucleus").evaluate((element) => {
+    const box = element.getBoundingClientRect();
+    return { top: box.top, bottom: box.bottom, left: box.left, right: box.right, width: innerWidth, height: innerHeight };
+  });
+  assert.ok(languageMenuBounds.top >= 0 && languageMenuBounds.bottom <= languageMenuBounds.height && languageMenuBounds.left >= 0 && languageMenuBounds.right <= languageMenuBounds.width, `${prefix}: language menu leaves the viewport`);
   await capture(page, prefix, "05-selecteur-langue");
-  await page.keyboard.press("Escape");
+  await selectWithTouch('[data-action="set-locale"][data-locale="ar"]');
+  assert.equal(await page.locator("html").getAttribute("lang"), "ar", `${prefix}: Arabic selection did not apply`);
+  assert.equal(await page.locator("html").getAttribute("dir"), "rtl", `${prefix}: Arabic selection did not enable RTL`);
+  assert.equal(await page.locator(".language-nucleus").count(), 0, `${prefix}: language menu did not close after selection`);
+  await page.reload({ waitUntil: "networkidle" });
+  assert.equal(await page.locator("html").getAttribute("lang"), "ar", `${prefix}: selected language was not preserved after reload`);
+  await page.locator('[data-action="toggle-public-menu"]').click();
+  await selectWithTouch('[data-action="open-language"]');
+  await selectWithTouch(`[data-action="set-locale"][data-locale="${locale}"]`);
   assert.ok(await page.locator(".public-nucleus.is-expanded").isVisible(), `${prefix}: main nucleus closed with language menu`);
 
   await page.locator('[data-action="open-faq"]').click();
@@ -109,7 +135,7 @@ async function publicSuite(browser, prefix, viewport, locale, colorScheme) {
   await capture(page, prefix, "09-connexion");
 
   assert.deepEqual(errors, [], `${prefix}: browser errors`);
-  await page.close();
+  await context.close();
 }
 
 async function memberSuite(browser, prefix, viewport, locale, colorScheme) {

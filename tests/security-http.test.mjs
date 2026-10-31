@@ -153,6 +153,57 @@ test("SG-018 requires and records versioned adult terms acceptance", async () =>
   assert.equal(consent.terms_version, "2026-10-21");
 });
 
+test("registration validation does not consume the anti-abuse quota and shared IPs retain headroom", async () => {
+  const ip = "203.0.113.44";
+  const invalid = {
+    email: "correct-after-error@example.test",
+    password: "Phase1Test!",
+    full_name: "Corrected Form",
+    district: "Rabat",
+  };
+  for (let attempt = 0; attempt < 6; attempt += 1) {
+    const result = await api("/api/auth/register", { method: "POST", headers: { "cf-connecting-ip": ip }, body: invalid });
+    assert.equal(result.response.status, 400, "an incomplete form must remain a validation error");
+  }
+  const corrected = await api("/api/auth/register", {
+    method: "POST",
+    headers: { "cf-connecting-ip": ip },
+    body: { ...invalid, accept_terms: true },
+  });
+  assert.equal(corrected.response.status, 201, "a corrected form must register immediately");
+
+  const sameNetwork = await Promise.all(Array.from({ length: 8 }, (_, index) => api("/api/auth/register", {
+    method: "POST",
+    headers: { "cf-connecting-ip": ip },
+    body: {
+      email: `shared-ip-${index}@example.test`, password: "Phase1Test!", full_name: `Shared Person ${index}`,
+      district: "Rabat", accept_terms: true,
+    },
+  })));
+  assert.equal(sameNetwork.filter((result) => result.response.status === 201).length, 8, "legitimate users behind one IP must not be blocked early");
+
+  const repeatedEmail = "repeated-signup@example.test";
+  const first = await api("/api/auth/register", {
+    method: "POST", headers: { "cf-connecting-ip": "203.0.113.45" },
+    body: { email: repeatedEmail, password: "Phase1Test!", full_name: "Repeat Signup", district: "Rabat", accept_terms: true },
+  });
+  assert.equal(first.response.status, 201);
+  for (let attempt = 0; attempt < 4; attempt += 1) {
+    const duplicate = await api("/api/auth/register", {
+      method: "POST", headers: { "cf-connecting-ip": "203.0.113.45" },
+      body: { email: repeatedEmail, password: "Phase1Test!", full_name: "Repeat Signup", district: "Rabat", accept_terms: true },
+    });
+    assert.equal(duplicate.response.status, 409);
+  }
+  const throttled = await api("/api/auth/register", {
+    method: "POST", headers: { "cf-connecting-ip": "203.0.113.45" },
+    body: { email: repeatedEmail, password: "Phase1Test!", full_name: "Repeat Signup", district: "Rabat", accept_terms: true },
+  });
+  assert.equal(throttled.response.status, 429);
+  assert.equal(throttled.json.code, "REGISTRATION_RATE_LIMITED");
+  assert.ok(Number(throttled.response.headers.get("retry-after")) > 0, "a 429 must provide a retry duration");
+});
+
 test("SG-002 rejects cross-account private operations without writes", async () => {
   const aEmail = "security-a@example.test";
   const bEmail = "security-b@example.test";

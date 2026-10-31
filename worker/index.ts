@@ -31,6 +31,9 @@ const jsonHeaders = {
 
 const newAccountRequestQuota = 3;
 const newAccountRequestQuotaWindowSeconds = 24 * 60 * 60;
+const registrationEmailQuota = 5;
+const registrationIpQuota = 24;
+const registrationQuotaWindowSeconds = 15 * 60;
 const activeServiceQuota = 5;
 const currentTermsVersion = "2026-10-21";
 
@@ -58,6 +61,26 @@ function requestQuotaExceeded(): Response {
     code: "REQUEST_QUOTA_EXCEEDED",
     retry_after_seconds: newAccountRequestQuotaWindowSeconds,
   }, 429, { "retry-after": String(newAccountRequestQuotaWindowSeconds) });
+}
+
+function retryAfterSeconds(windowSeconds: number): number {
+  const windowMs = windowSeconds * 1000;
+  return Math.max(1, Math.ceil((windowMs - (Date.now() % windowMs)) / 1000));
+}
+
+function registrationRateLimited(request: Request): Response {
+  const retryAfter = retryAfterSeconds(registrationQuotaWindowSeconds);
+  const minutes = Math.ceil(retryAfter / 60);
+  const message = {
+    fr: `Trop de tentatives d'inscription. Réessayez dans ${minutes} minute${minutes > 1 ? "s" : ""}.`,
+    en: `Too many sign-up attempts. Try again in ${minutes} minute${minutes > 1 ? "s" : ""}.`,
+    ar: `عدد كبير من محاولات التسجيل. يُرجى إعادة المحاولة بعد ${minutes} دقيقة.`,
+  }[preferredLocale(request)];
+  return json({
+    error: message,
+    code: "REGISTRATION_RATE_LIMITED",
+    retry_after_seconds: retryAfter,
+  }, 429, { "retry-after": String(retryAfter) });
 }
 
 function blockedInteraction(): Response {
@@ -484,7 +507,7 @@ async function handleAuth(request: Request, env: Env, ctx: ExecutionContext, pat
   const password = text(body.password, 200);
   if (!validEmail(email) || password.length < 8) return badRequest("Utilisez une adresse e-mail valide et un mot de passe d'au moins 8 caractères.");
 
-  if (!(await consumeRateLimit(env, pathname === "/api/auth/register" ? "register" : "login", clientAddress(request), pathname === "/api/auth/register" ? 5 : 12, 900))) {
+  if (pathname === "/api/auth/login" && !(await consumeRateLimit(env, "login", clientAddress(request), 12, 900))) {
     return json({ error: "Trop de tentatives. Réessayez dans quelques minutes." }, 429);
   }
 
@@ -496,6 +519,11 @@ async function handleAuth(request: Request, env: Env, ctx: ExecutionContext, pat
     if (fullName.length < 2) return badRequest("Indiquez votre prénom et votre nom.");
     if (body.accept_terms !== true) return badRequest("Vous devez confirmer avoir au moins 18 ans et accepter les conditions d'utilisation.");
     if (!(await verifyTurnstile(text(body.turnstile_token, 2048), request, env))) return badRequest("La vérification anti-abus a échoué.");
+    const ip = clientAddress(request);
+    if (!(await consumeRateLimit(env, "register-email", email, registrationEmailQuota, registrationQuotaWindowSeconds))
+      || !(await consumeRateLimit(env, "register-ip", ip, registrationIpQuota, registrationQuotaWindowSeconds))) {
+      return registrationRateLimited(request);
+    }
     const exists = await env.DB.prepare("SELECT id FROM profiles WHERE email = ?").bind(email).first<{ id: string }>();
     if (exists) return json({ error: "Cette adresse e-mail est déjà utilisée. Connectez-vous." }, 409);
     const id = crypto.randomUUID();
