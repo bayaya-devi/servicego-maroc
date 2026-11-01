@@ -18,8 +18,8 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
 .nav-button, .button, .quick-trigger { min-height: var(--sg-target); border: 0; border-radius: var(--sg-radius); padding: 10px 14px; color: var(--sg-ink); background: transparent; font-weight: 760; }
 .nav-button:hover, .nav-button.active { color: var(--sg-blue-strong); background: rgba(37,133,230,.12); }
 .quick-trigger { width: 46px; padding: 0; color: #fff; border-radius: 50%; background: var(--sg-mint-strong); box-shadow: var(--sg-shadow-sm); }
-.button { color: #fff; background: var(--sg-blue); box-shadow: 0 8px 22px rgba(37,133,230,.22); }
-.button:hover { background: var(--sg-blue-strong); }
+.button { color: #fff; background: var(--sg-action-blue); box-shadow: 0 8px 22px rgba(18,104,194,.22); }
+.button:hover { background: var(--sg-action-blue-hover); }
 .button.green, .button.accent { color: #172033; background: var(--sg-orange); box-shadow: 0 8px 22px rgba(255,145,56,.25); }
 .button.green:hover, .button.accent:hover { background: var(--sg-orange-strong); color: #fff; }
 .button.secondary { color: var(--sg-blue-strong); background: rgba(255,255,255,.82); box-shadow: none; }

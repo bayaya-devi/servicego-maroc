@@ -6,7 +6,7 @@ const read = (path) => readFile(new URL(`../${path}`, import.meta.url), "utf8");
 
 test("the document exposes the design system and a skip link", async () => {
   const html = await read("public/index.html");
-  assert.match(html, /tokens\.css/);
+  assert.match(html, /tokens(?:\.min)?\.css/);
   assert.match(html, /class="skip-link" href="#main-content"/);
   assert.match(html, /assets\/servicego-symbol\.svg/);
 });
@@ -23,7 +23,7 @@ test("official semantic colors and responsive rules are centralized", async () =
 
 test("the Premium layer defines three glass levels and adaptive experiences", async () => {
   const [html, premium] = await Promise.all([read("public/index.html"), read("public/premium.css")]);
-  assert.match(html, /premium\.css/);
+  assert.match(html, /premium(?:\.min)?\.css/);
   for (const token of ["--sg-glass-1", "--sg-glass-2", "--sg-glass-3"]) assert.match(premium, new RegExp(token));
   assert.match(premium, /@media \(min-width: 761px\) and \(max-width: 1024px\)/);
   assert.match(premium, /@media \(max-width: 760px\)/);
