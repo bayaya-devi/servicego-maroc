@@ -267,6 +267,8 @@ test("SG-002 rejects cross-account private operations without writes", async () 
   assert.equal(aRequests.json.requests.find((item) => item.id === id).title, "Alice request");
   assert.equal((await api("/api/admin/overview", { cookie: b.cookie })).response.status, 403);
   assert.equal((await api("/api/admin/overview", { cookie: admin.cookie })).response.status, 200);
+  assert.equal((await api("/api/admin/reports", { cookie: b.cookie })).response.status, 403);
+  assert.equal((await api("/api/admin/reports", { cookie: admin.cookie })).response.status, 200);
   assert.equal((await api("/api/conversations/not-a-conversation/messages", { cookie: b.cookie })).response.status, 404);
   assert.equal((await api("/api/files/uploads/not-owner/00000000-0000-0000-0000-000000000000.jpg", { cookie: b.cookie })).response.status, 404);
 });

@@ -37,6 +37,8 @@ const state = {
   mine: { requests: [], services: [] },
   offers: { request: null, items: [] },
   adminStats: null,
+  adminReports: [],
+  reportTarget: null,
   locale: initialLocale,
   mapFilter: "all",
   mapCategory: "all",
@@ -511,10 +513,11 @@ function selectedItem() {
     : request
       ? `<button class="button" data-action="open-reply" data-id="${item.id}">Proposer mon aide</button>`
       : `<button class="button green" data-action="open-direct" data-id="${item.id}">Demander ce service</button>`;
-  return `<div class="listing-detail"><div class="listing-type ${request ? "need" : "help"}">${icon(request ? "request" : "offer")}<span>${translate(state.locale, request ? "Demande de service" : "Offre de service")}</span></div><h2>${escape(item.title)}</h2>${photo}<dl class="listing-facts"><div><dt>Catégorie</dt><dd>${escape(translate(state.locale, item.category_name || "Service"))}</dd></div><div><dt>${translate(state.locale, request ? "Budget" : "Prix")}</dt><dd>${escape(translate(state.locale, pricing.full))}</dd></div><div><dt>Localisation approximative</dt><dd>${escape(item.district)}</dd></div>${item.created_at ? `<div><dt>Publication</dt><dd>${escape(formatDate(item.created_at))}</dd></div>` : ""}</dl><p class="listing-description">${escape(item.description)}</p><div class="listing-author"><span class="conversation-avatar">${escape(initials(identity))}</span><div><small>Publié par</small><strong>${escape(identity || translate(state.locale, "Utilisateur ServiceGO"))}</strong>${!request ? `<span>${ratingPresentation(item.rating, item.review_count)}</span>` : ""}</div></div><div class="detail-actions">${actions}</div></div>`;
+  const reportAction = own ? "" : `<button class="text-button danger-action" data-action="open-report" data-type="${request ? "request" : "service"}" data-id="${escape(item.id)}">Signaler cette annonce</button>`;
+  return `<div class="listing-detail"><div class="listing-type ${request ? "need" : "help"}">${icon(request ? "request" : "offer")}<span>${translate(state.locale, request ? "Demande de service" : "Offre de service")}</span></div><h2>${escape(item.title)}</h2>${photo}<dl class="listing-facts"><div><dt>Catégorie</dt><dd>${escape(translate(state.locale, item.category_name || "Service"))}</dd></div><div><dt>${translate(state.locale, request ? "Budget" : "Prix")}</dt><dd>${escape(translate(state.locale, pricing.full))}</dd></div><div><dt>Localisation approximative</dt><dd>${escape(item.district)}</dd></div>${item.created_at ? `<div><dt>Publication</dt><dd>${escape(formatDate(item.created_at))}</dd></div>` : ""}</dl><p class="listing-description">${escape(item.description)}</p><div class="listing-author"><span class="conversation-avatar">${escape(initials(identity))}</span><div><small>Publié par</small><strong>${escape(identity || translate(state.locale, "Utilisateur ServiceGO"))}</strong>${!request ? `<span>${ratingPresentation(item.rating, item.review_count)}</span>` : ""}</div></div><div class="detail-actions">${actions}${reportAction}</div></div>`;
 }
 function mapView() {
-  return `<main id="main-content" class="workspace premium-map-workspace" tabindex="-1"><section class="map-panel ${state.mapMode === "globe" ? "globe-panel" : ""}"><div class="map-mode-control" role="group" aria-label="Mode de carte"><button class="${state.mapMode === "2d" ? "active" : ""}" data-action="map-mode" data-value="2d">2D</button><button class="${state.mapMode === "globe" ? "active" : ""}" data-action="map-mode" data-value="globe" ${globeSupported() ? "" : "disabled"}>3D</button></div><div id="liveMap" class="real-map ${state.mapMode === "globe" ? "real-globe" : ""}" tabindex="0" aria-label="${state.mapMode === "globe" ? "Globe terrestre interactif. Faites glisser pour tourner et utilisez la molette pour zoomer." : "Carte interactive mondiale. Maintenez appuyé pour créer une demande."}"></div>${state.mapMode === "2d" ? `<button class="map-locate" data-action="locate-me" aria-label="Activer ma localisation">${icon("location")}</button>` : ""}<p class="map-guidance">${state.mapMode === "globe" ? "Explorez le monde en faisant tourner le globe. Sélectionnez une bulle pour ouvrir sa publication." : "Pour demander un service, choisissez un emplacement sur la carte et maintenez votre doigt ou votre souris appuyé. Pour proposer votre aide, sélectionnez une bulle de demande et répondez à son auteur. <button data-action=\"map-create-center\">Utiliser le centre de la carte</button>"}</p></section><aside class="panel selection">${selectedItem()}<details class="accessible-list"><summary>Liste accessible</summary>${accessibleMapList()}</details></aside></main>`;
+  return `<main id="main-content" class="workspace premium-map-workspace" tabindex="-1"><section class="map-panel ${state.mapMode === "globe" ? "globe-panel" : ""}"><div class="map-mode-control" role="group" aria-label="Mode de carte"><button class="${state.mapMode === "2d" ? "active" : ""}" data-action="map-mode" data-value="2d">2D</button><button class="${state.mapMode === "globe" ? "active" : ""}" data-action="map-mode" data-value="globe" ${globeSupported() ? "" : "disabled"}>3D</button></div><div id="liveMap" class="real-map ${state.mapMode === "globe" ? "real-globe" : ""}" tabindex="0" aria-label="${state.mapMode === "globe" ? "Globe terrestre interactif. Faites glisser pour tourner et utilisez la molette pour zoomer." : "Carte interactive mondiale. Maintenez appuyé pour créer une demande."}"></div>${state.mapMode === "2d" ? `<button class="map-locate" data-action="locate-me" aria-label="Activer ma localisation">${icon("location")}</button>` : ""}<p class="map-guidance">${state.mapMode === "globe" ? "Explorez le monde en faisant tourner le globe. Sélectionnez une bulle pour ouvrir sa publication." : "Pour demander un service, choisissez un emplacement sur la carte et maintenez votre doigt ou votre souris appuyé. Pour proposer votre aide, sélectionnez une bulle de demande et répondez à son auteur. <button data-action=\"map-create-center\">Utiliser le centre de la carte</button>"}</p></section><aside class="panel selection ${state.selected ? "has-selection" : ""}">${selectedItem()}<details class="accessible-list"><summary>Liste accessible</summary>${accessibleMapList()}</details></aside></main>`;
 }
 function messageContent(message) {
   const type = message.message_type || "text";
@@ -577,7 +580,7 @@ function profileView() {
     ? state.activity.reviews.map((review) => `<li class="received-review"><strong>${"★".repeat(Number(review.rating))}${"☆".repeat(5 - Number(review.rating))}</strong><span>${escape(review.request_title)}</span>${review.comment ? `<p>${escape(review.comment)}</p>` : ""}<small>${escape(review.reviewer_name)} · ${escape(formatDate(review.created_at))}</small></li>`).join("")
     : "<li>Aucune évaluation publiée.</li>";
   const admin = user.is_admin
-    ? `<section class="panel profile-box"><h3>Administration</h3><p>${state.adminStats ? `${state.adminStats.users} ${translate(state.locale, "comptes")}<br>${state.adminStats.open_requests} ${translate(state.locale, "demandes ouvertes")}<br>${state.adminStats.active_services} ${translate(state.locale, "services visibles")}` : "Chargement des statistiques…"}</p></section>`
+    ? `<section class="panel profile-box"><h3>Administration</h3><p>${state.adminStats ? `${state.adminStats.users} ${translate(state.locale, "comptes")}<br>${state.adminStats.open_requests} ${translate(state.locale, "demandes ouvertes")}<br>${state.adminStats.active_services} ${translate(state.locale, "services visibles")}` : "Chargement des statistiques…"}</p><button class="button secondary" data-action="view" data-view="admin">Ouvrir la modération</button></section>`
     : "";
   const activeRequests = state.mine.requests.filter((item) => item.status === "open" || item.status === "assigned").length;
   const completedRequests = state.mine.requests.filter((item) => item.status === "completed").length;
@@ -592,7 +595,10 @@ function verificationView() {
 }
 function adminView() {
   const stats = state.adminStats || {};
-  return `<main id="main-content" class="view-page member-page" tabindex="-1"><p class="eyebrow">Administration</p><h1>Tableau de bord</h1><p class="page-lead">Vue réservée aux administrateurs ServiceGO.</p><div class="stats-grid"><section class="panel"><strong>${Number(stats.users || 0)}</strong><span>Utilisateurs</span></section><section class="panel"><strong>${Number(stats.open_requests || 0)}</strong><span>Demandes ouvertes</span></section><section class="panel"><strong>${Number(stats.active_services || 0)}</strong><span>Services actifs</span></section><section class="panel"><strong>${Number(stats.conversations || 0)}</strong><span>Conversations</span></section></div></main>`;
+  const reports = state.adminReports.length
+    ? state.adminReports.map((report) => `<article class="panel admin-report"><div><strong>${escape(report.reason)}</strong><span>${escape(translate(state.locale, report.subject_type))} · ${escape(report.reporter_name)}</span>${report.details ? `<p>${escape(report.details)}</p>` : ""}<small>${escape(formatDate(report.created_at))}</small></div><label><span>Statut</span><select data-action="admin-report-status" data-id="${escape(report.id)}"><option value="open" ${report.status === "open" ? "selected" : ""}>Ouvert</option><option value="reviewing" ${report.status === "reviewing" ? "selected" : ""}>En cours</option><option value="closed" ${report.status === "closed" ? "selected" : ""}>Fermé</option></select></label></article>`).join("")
+    : `<p class="panel empty-admin">Aucun signalement.</p>`;
+  return `<main id="main-content" class="view-page member-page admin-page" tabindex="-1"><p class="eyebrow">Administration</p><h1>Tableau de bord</h1><p class="page-lead">Vue réservée aux administrateurs ServiceGO.</p><div class="stats-grid"><section class="panel"><strong>${Number(stats.users || 0)}</strong><span>Utilisateurs</span></section><section class="panel"><strong>${Number(stats.open_requests || 0)}</strong><span>Demandes ouvertes</span></section><section class="panel"><strong>${Number(stats.active_services || 0)}</strong><span>Services actifs</span></section><section class="panel"><strong>${Number(stats.conversations || 0)}</strong><span>Conversations</span></section><section class="panel"><strong>${Number(stats.open_reports || 0)}</strong><span>Signalements ouverts</span></section></div><section class="admin-reports"><h2>Signalements</h2>${reports}</section></main>`;
 }
 function authModal() {
   const register = state.authMode === "register";
@@ -647,6 +653,9 @@ function deleteAccountModal() {
 }
 function reviewModal() {
   return `<div class="modal-layer"><section class="modal review-modal"><button class="button icon outline close" data-action="close-modal" aria-label="Fermer">×</button><p class="eyebrow">Évaluation mutuelle</p><h2>Comment s'est passé le service ?</h2><p class="modal-intro">Votre avis sera publié lorsque l'autre personne aura évalué, ou dans sept jours.</p><form class="form-grid" data-form="review"><input type="hidden" name="request_id" value="${escape(state.reviewRequestId)}" /><fieldset class="rating-field full"><legend>Note de 1 à 5 étoiles</legend>${[1,2,3,4,5].map((value)=>`<label><input type="radio" name="rating" value="${value}" required /><span>${icon("star")}</span><b>${value}</b></label>`).join("")}</fieldset><label class="field full"><span>Commentaire facultatif</span><textarea name="comment" maxlength="500" placeholder="Décrivez votre expérience sans partager d'informations personnelles."></textarea></label><button class="button submit" type="submit">Enregistrer mon évaluation</button></form></section></div>`;
+}
+function reportModal() {
+  return `<div class="modal-layer"><section class="modal public-modal report-modal"><button class="button icon outline close" data-action="close-modal" aria-label="Fermer">×</button><p class="eyebrow">Sécurité</p><h2>Signaler cette annonce</h2><p class="modal-intro">Décrivez le problème sans partager d'informations sensibles.</p><form class="form-grid" data-form="report"><label class="field full"><span>Motif</span><select name="reason" required><option value="Contenu trompeur">Contenu trompeur</option><option value="Comportement dangereux">Comportement dangereux</option><option value="Spam ou fraude">Spam ou fraude</option><option value="Autre problème">Autre problème</option></select></label><label class="field full"><span>Détails facultatifs</span><textarea name="details" maxlength="1200" placeholder="Ajoutez les éléments utiles à la modération."></textarea></label><button class="button submit danger-action" type="submit">Envoyer le signalement</button></form></section></div>`;
 }
 function offersModal() {
   const request = state.offers.request;
@@ -720,6 +729,7 @@ function modal() {
   if (state.modal === "notifications") return notificationsModal();
   if (state.modal === "delete-account") return deleteAccountModal();
   if (state.modal === "review") return reviewModal();
+  if (state.modal === "report") return reportModal();
   if (state.modal === "offers") return offersModal();
   if (state.modal === "quick") return quickModal();
   if (state.modal === "info") return infoModal();
@@ -798,6 +808,7 @@ function mountTurnstile() {
 function closeModal() {
   if (state.modal === "auth") state.pendingIntent = null;
   if (state.modal === "request") state.selectedMapPoint = null;
+  if (state.modal === "report") state.reportTarget = null;
   state.modal = null;
 }
 function initializeStory() {
@@ -948,7 +959,11 @@ async function prepareView(view) {
     await Promise.all([loadMine(), loadConversations(false), loadActivity()]);
     if (state.user?.is_admin) state.adminStats = (await api("/api/admin/overview")).stats;
   }
-  if (view === "admin" && state.user?.is_admin) state.adminStats = (await api("/api/admin/overview")).stats;
+  if (view === "admin" && state.user?.is_admin) {
+    const [overview, reports] = await Promise.all([api("/api/admin/overview"), api("/api/admin/reports")]);
+    state.adminStats = overview.stats;
+    state.adminReports = reports.reports || [];
+  }
 }
 async function navigateToView(view, { replace = false, renderNow = true } = {}) {
   const target = routeForView[view] ? view : "map";
@@ -1175,6 +1190,11 @@ app.addEventListener("click", async (event) => {
       state.modal = "review";
       render();
     }
+    if (action === "open-report") {
+      state.reportTarget = { type: button.dataset.type, id: button.dataset.id };
+      state.modal = "report";
+      render();
+    }
     if (action === "open-settings") {
       modalReturnAction = action;
       state.modal = "settings";
@@ -1336,7 +1356,7 @@ app.addEventListener("click", async (event) => {
     notify(error.message, true);
   }
 });
-app.addEventListener("change", (event) => {
+app.addEventListener("change", async (event) => {
   const target = event.target;
   if (target.matches('[data-action="message-file"]') && target.files?.[0]) {
     const file = target.files[0];
@@ -1356,6 +1376,16 @@ app.addEventListener("change", (event) => {
     state.mapCategory = target.value;
     state.selected = null;
     render();
+  }
+  if (target.matches('[data-action="admin-report-status"]')) {
+    try {
+      await api(`/api/admin/reports/${encodeURIComponent(target.dataset.id)}`, { method: "PATCH", body: JSON.stringify({ status: target.value }) });
+      await prepareView("admin");
+      render();
+      notify("Statut du signalement enregistré.");
+    } catch (error) {
+      notify(error.message, true);
+    }
   }
 });
 document.addEventListener("click", (event) => {
@@ -1643,6 +1673,17 @@ app.addEventListener("submit", async (event) => {
       await Promise.all([loadActivity(), loadMine(), loadConversations(false)]);
       render();
       window.scrollTo({ top: 0, left: 0, behavior: "auto" });
+      notify(data.message);
+    }
+    if (type === "report") {
+      if (!state.reportTarget) throw new Error("Signalement invalide.");
+      const data = await api("/api/reports", {
+        method: "POST",
+        body: JSON.stringify({ subject_type: state.reportTarget.type, subject_id: state.reportTarget.id, reason: values.reason, details: values.details }),
+      });
+      state.reportTarget = null;
+      state.modal = null;
+      render();
       notify(data.message);
     }
   } catch (error) {
