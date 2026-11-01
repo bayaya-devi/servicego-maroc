@@ -204,6 +204,53 @@ test("registration validation does not consume the anti-abuse quota and shared I
   assert.ok(Number(throttled.response.headers.get("retry-after")) > 0, "a 429 must provide a retry duration");
 });
 
+test("email verification requires a single-use six-digit code before activation", async () => {
+  const email = "code-verification@example.test";
+  const cookie = await register(email, "Verification");
+  const profile = await database.prepare("SELECT id, email_verified FROM profiles WHERE email = ?").bind(email).first();
+  assert.equal(profile.email_verified, 0);
+  const code = "482913";
+  const hash = createHash("sha256").update(code).digest("hex");
+  await database.prepare("INSERT INTO email_verifications (id, user_id, email, purpose, token_hash, expires_at) VALUES (?, ?, ?, 'signup', ?, datetime('now', '+15 minutes'))")
+    .bind("00000000-0000-0000-0000-000000000099", profile.id, email, hash).run();
+  const invalid = await api("/api/auth/verify-email", { cookie, method: "POST", body: { code: "000000" } });
+  assert.equal(invalid.response.status, 400);
+  const verified = await api("/api/auth/verify-email", { cookie, method: "POST", body: { code } });
+  assert.equal(verified.response.status, 200);
+  assert.equal(verified.json.user.email_verified, 1);
+  const reused = await api("/api/auth/verify-email", { cookie, method: "POST", body: { code } });
+  assert.equal(reused.response.status, 400);
+});
+
+test("profile ratings remain empty at zero reviews and aggregate only published reviews", async () => {
+  const subjectEmail = "rating-subject@example.test";
+  await register(subjectEmail, "Rating Subject");
+  await database.prepare("UPDATE profiles SET email_verified = 1 WHERE email = ?").bind(subjectEmail).run();
+  const subject = await api("/api/auth/login", { method: "POST", body: { email: subjectEmail, password: "Phase1Test!" } });
+  assert.equal(subject.response.status, 200);
+
+  const noReviews = await api("/api/activity", { cookie: subject.cookie });
+  assert.equal(noReviews.response.status, 200);
+  assert.equal(noReviews.json.rating, 0);
+  assert.equal(noReviews.json.review_count, 0);
+
+  const request = await api("/api/requests", { cookie: subject.cookie, method: "POST", body: requestBody("Rating request") });
+  assert.equal(request.response.status, 201);
+  const subjectProfile = await database.prepare("SELECT id FROM profiles WHERE email = ?").bind(subjectEmail).first();
+  for (const [index, score] of [4, 5].entries()) {
+    const reviewerEmail = `rating-reviewer-${index}@example.test`;
+    await register(reviewerEmail, `Reviewer ${index}`);
+    const reviewer = await database.prepare("SELECT id FROM profiles WHERE email = ?").bind(reviewerEmail).first();
+    await database.prepare(
+      "INSERT INTO reviews (id, request_id, reviewer_id, reviewed_id, rating, comment, publish_after) VALUES (?, ?, ?, ?, ?, ?, datetime('now', '-1 minute'))",
+    ).bind(`00000000-0000-0000-0000-0000000001${index}`, request.json.id, reviewer.id, subjectProfile.id, score, "Published rating").run();
+    const activity = await api("/api/activity", { cookie: subject.cookie });
+    assert.equal(activity.response.status, 200);
+    assert.equal(activity.json.review_count, index + 1);
+    assert.equal(activity.json.rating, index === 0 ? 4 : 4.5);
+  }
+});
+
 test("SG-002 rejects cross-account private operations without writes", async () => {
   const aEmail = "security-a@example.test";
   const bEmail = "security-b@example.test";

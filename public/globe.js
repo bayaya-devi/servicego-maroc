@@ -29,16 +29,21 @@ export function mountGlobe(target, entries, onSelect) {
 
   const world = new THREE.Group();
   scene.add(world);
+  target.classList.add("is-globe-loading");
+  target.setAttribute("aria-busy", "true");
+  const texture = new THREE.TextureLoader().load("/assets/globe-earth.svg", () => {
+    target.classList.remove("is-globe-loading");
+    target.removeAttribute("aria-busy");
+  }, undefined, () => {
+    target.classList.remove("is-globe-loading");
+    target.removeAttribute("aria-busy");
+  });
+  texture.colorSpace = THREE.SRGBColorSpace;
   const earth = new THREE.Mesh(
-    new THREE.SphereGeometry(2.35, 64, 48),
-    new THREE.MeshStandardMaterial({ color: 0x167eb8, roughness: .72, metalness: .05, emissive: 0x06273e, emissiveIntensity: .28 }),
+    new THREE.SphereGeometry(2.35, 96, 64),
+    new THREE.MeshStandardMaterial({ map: texture, color: 0xffffff, roughness: .76, metalness: .02, emissive: 0x061b2a, emissiveIntensity: .16 }),
   );
   world.add(earth);
-  const grid = new THREE.LineSegments(
-    new THREE.WireframeGeometry(new THREE.SphereGeometry(2.365, 32, 20)),
-    new THREE.LineBasicMaterial({ color: 0x9fe8dc, transparent: true, opacity: .16 }),
-  );
-  world.add(grid);
   const atmosphere = new THREE.Mesh(
     new THREE.SphereGeometry(2.48, 48, 32),
     new THREE.MeshBasicMaterial({ color: 0x75d9ec, transparent: true, opacity: .09, side: THREE.BackSide }),
@@ -94,7 +99,7 @@ export function mountGlobe(target, entries, onSelect) {
     const hit = raycaster.intersectObjects(markers, false)[0];
     if (hit) onSelect(hit.object.userData.entry);
   };
-  const wheel = (event) => { event.preventDefault(); camera.position.z = Math.max(4.4, Math.min(10, camera.position.z + Math.sign(event.deltaY) * .45)); };
+  const wheel = (event) => { event.preventDefault(); camera.position.z = Math.max(4.8, Math.min(9, camera.position.z + Math.sign(event.deltaY) * .4)); };
   renderer.domElement.addEventListener("pointerdown", down);
   renderer.domElement.addEventListener("pointermove", move);
   renderer.domElement.addEventListener("pointerup", up);
@@ -109,7 +114,7 @@ export function mountGlobe(target, entries, onSelect) {
     cancelAnimationFrame(frame);
     observer.disconnect();
     renderer.dispose();
-    scene.traverse((object) => { object.geometry?.dispose?.(); if (object.material) (Array.isArray(object.material) ? object.material : [object.material]).forEach((material) => material.dispose()); });
+    scene.traverse((object) => { object.geometry?.dispose?.(); if (object.material) (Array.isArray(object.material) ? object.material : [object.material]).forEach((material) => { material.map?.dispose?.(); material.dispose(); }); });
     target.replaceChildren();
   };
 }

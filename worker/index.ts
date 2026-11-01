@@ -34,6 +34,7 @@ const newAccountRequestQuotaWindowSeconds = 24 * 60 * 60;
 const registrationEmailQuota = 5;
 const registrationIpQuota = 24;
 const registrationQuotaWindowSeconds = 15 * 60;
+const verificationCodeLifetimeMinutes = 15;
 const activeServiceQuota = 5;
 const currentTermsVersion = "2026-10-21";
 
@@ -197,13 +198,21 @@ async function sendEmail(env: Env, recipient: string, content: EmailContent): Pr
   }
 }
 
-async function createEmailVerification(env: Env, userId: string, email: string, purpose: "signup" | "change_email"): Promise<string> {
-  const token = randomToken();
+function verificationCode(): string {
+  const range = 1_000_000;
+  const limit = 0x1_0000_0000 - (0x1_0000_0000 % range);
+  let value = limit;
+  while (value >= limit) value = crypto.getRandomValues(new Uint32Array(1))[0];
+  return String(value % range).padStart(6, "0");
+}
+
+async function createEmailVerification(env: Env, userId: string, email: string, purpose: "signup" | "change_email", useCode = false): Promise<string> {
+  const token = useCode ? verificationCode() : randomToken();
   await env.DB.prepare("UPDATE email_verifications SET used_at = CURRENT_TIMESTAMP WHERE user_id = ? AND purpose = ? AND used_at IS NULL")
     .bind(userId, purpose)
     .run();
   await env.DB.prepare(
-    "INSERT INTO email_verifications (id, user_id, email, purpose, token_hash, expires_at) VALUES (?, ?, ?, ?, ?, datetime('now', '+24 hours'))",
+    `INSERT INTO email_verifications (id, user_id, email, purpose, token_hash, expires_at) VALUES (?, ?, ?, ?, ?, datetime('now', '+${useCode ? verificationCodeLifetimeMinutes : 24} ${useCode ? "minutes" : "hours"}'))`,
   )
     .bind(crypto.randomUUID(), userId, email, purpose, await tokenHash(token))
     .run();
@@ -213,6 +222,17 @@ async function createEmailVerification(env: Env, userId: string, email: string, 
 async function sendVerificationEmail(env: Env, email: string, fullName: string, token: string, origin: string, purpose: "signup" | "change_email", locale: Locale): Promise<boolean> {
   const link = `${origin}/api/auth/verify-email?token=${encodeURIComponent(token)}`;
   return sendEmail(env, email, transactionalEmail(locale, purpose === "signup" ? "verify_signup" : "verify_email_change", fullName, link));
+}
+
+async function sendVerificationCodeEmail(env: Env, email: string, fullName: string, code: string, locale: Locale): Promise<boolean> {
+  const copy = {
+    fr: ["Votre code ServiceGO", "Confirmez votre adresse e-mail", "Bonjour", "Saisissez ce code dans ServiceGO. Il expire dans 15 minutes.", "Votre code", "Ne partagez jamais ce code."],
+    en: ["Your ServiceGO code", "Confirm your email address", "Hello", "Enter this code in ServiceGO. It expires in 15 minutes.", "Your code", "Never share this code."],
+    ar: ["رمز ServiceGO الخاص بك", "أكّد بريدك الإلكتروني", "مرحبًا", "أدخل هذا الرمز في ServiceGO. تنتهي صلاحيته خلال 15 دقيقة.", "رمزك", "لا تشارك هذا الرمز مع أي شخص."],
+  }[locale];
+  const direction = locale === "ar" ? "rtl" : "ltr";
+  const html = `<!doctype html><html lang="${locale}" dir="${direction}"><body style="margin:0;background:#f4f8fb;font-family:Arial,sans-serif;color:#0b2244"><table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#f4f8fb;padding:24px 12px"><tr><td align="center"><table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:600px;background:#fff;border-radius:12px"><tr><td style="padding:26px 32px;background:#1268c2;color:#fff"><strong style="font-size:24px">Service<span style="color:#8ee6c9">GO</span></strong></td></tr><tr><td style="padding:32px;line-height:1.55"><h1 style="margin:0 0 18px;font-size:24px">${copy[1]}</h1><p>${copy[2]} ${escapeHtml(fullName)},</p><p>${copy[3]}</p><p style="margin:28px 0;text-align:center;font-size:34px;font-weight:bold;letter-spacing:8px;color:#1268c2">${code}</p><p>${copy[5]}</p></td></tr></table></td></tr></table></body></html>`;
+  return sendEmail(env, email, { subject: copy[0], html, text: `${copy[1]}\n\n${copy[4]} : ${code}\n\n${copy[3]}\n${copy[5]}` });
 }
 
 function clientAddress(request: Request): string {
@@ -419,7 +439,7 @@ async function refreshProfileRating(env: Env, profileId: string): Promise<{ rati
      WHERE rv.reviewed_id = ? AND (rv.publish_after <= CURRENT_TIMESTAMP OR
        (SELECT COUNT(*) FROM reviews pair WHERE pair.request_id = rv.request_id) >= 2)`,
   ).bind(profileId).first<{ rating: number | null; review_count: number }>();
-  const rating = aggregate?.rating ?? 5;
+  const rating = aggregate?.rating ?? 0;
   const reviewCount = aggregate?.review_count ?? 0;
   await env.DB.prepare(
     "UPDATE profiles SET rating = ?, review_count = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
@@ -447,6 +467,26 @@ async function handleAuth(request: Request, env: Env, ctx: ExecutionContext, pat
       env.DB.prepare("UPDATE email_verifications SET used_at = CURRENT_TIMESTAMP WHERE id = ?").bind(verification.id),
     ]);
     return Response.redirect(`${new URL(request.url).origin}/?email_verified=1`, 302);
+  }
+
+  if (pathname === "/api/auth/verify-email" && request.method === "POST") {
+    const user = await requireUser(request, env);
+    if (isResponse(user)) return user;
+    if (user.email_verified) return badRequest("Votre adresse e-mail est déjà confirmée.");
+    if (!(await consumeRateLimit(env, "verify-email", `${user.id}:${clientAddress(request)}`, 8, 15 * 60))) {
+      return json({ error: "Trop de codes essayés. Réessayez dans quelques minutes." }, 429, { "retry-after": "900" });
+    }
+    const code = text((await readBody(request))?.code, 12).replace(/\s/g, "");
+    if (!/^\d{6}$/.test(code)) return badRequest("Saisissez le code à six chiffres reçu par e-mail.");
+    const verification = await env.DB.prepare(
+      "SELECT id, email FROM email_verifications WHERE user_id = ? AND purpose = 'signup' AND token_hash = ? AND used_at IS NULL AND expires_at > datetime('now')",
+    ).bind(user.id, await tokenHash(code)).first<{ id: string; email: string }>();
+    if (!verification) return badRequest("Ce code est incorrect ou a expiré. Demandez un nouveau code.");
+    await env.DB.batch([
+      env.DB.prepare("UPDATE profiles SET email = ?, email_verified = 1, updated_at = CURRENT_TIMESTAMP WHERE id = ?").bind(verification.email, user.id),
+      env.DB.prepare("UPDATE email_verifications SET used_at = CURRENT_TIMESTAMP WHERE id = ?").bind(verification.id),
+    ]);
+    return json({ user: await currentUser(request, env), message: "Adresse e-mail confirmée." });
   }
 
   if (pathname === "/api/auth/logout" && request.method === "POST") {
@@ -536,8 +576,8 @@ async function handleAuth(request: Request, env: Env, ctx: ExecutionContext, pat
       .bind(id, email, await passwordHash(password), fullName, storedFirstName, storedLastName, text(body.phone, 30) || null, district, currentTermsVersion)
       .run();
     const sessionId = await createSession(id, env);
-    const verificationToken = await createEmailVerification(env, id, email, "signup");
-    const emailAccepted = await sendVerificationEmail(env, email, fullName, verificationToken, new URL(request.url).origin, "signup", preferredLocale(request));
+    const verificationToken = await createEmailVerification(env, id, email, "signup", true);
+    const emailAccepted = await sendVerificationCodeEmail(env, email, fullName, verificationToken, preferredLocale(request));
     if (!emailAccepted) await invalidateToken(env, "email_verifications", verificationToken);
     const user = await currentUser(new Request(request.url, { headers: { cookie: `sg_session=${sessionId}` } }), env);
     return json({
@@ -768,16 +808,18 @@ async function handleApi(request: Request, env: Env, ctx: ExecutionContext): Pro
     if (isResponse(user)) return user;
     if (user.email_verified) return badRequest("Votre adresse est déjà confirmée.");
     if (!emailIsConfigured(env)) return json({ error: "L'envoi d'e-mails n'est pas encore configuré." }, 503);
+    const recent = await env.DB.prepare("SELECT 1 FROM email_verifications WHERE user_id = ? AND purpose = 'signup' AND created_at > datetime('now', '-60 seconds') LIMIT 1").bind(user.id).first();
+    if (recent) return json({ error: "Patientez une minute avant de demander un nouveau code." }, 429, { "retry-after": "60" });
     if (!(await consumeRateLimit(env, "resend_verification", user.id, 3, 3600))) {
       return json({ error: "Trop de tentatives. Réessayez dans une heure." }, 429);
     }
-    const token = await createEmailVerification(env, user.id, user.email, "signup");
-    const accepted = await sendVerificationEmail(env, user.email, user.full_name, token, new URL(request.url).origin, "signup", preferredLocale(request));
+    const token = await createEmailVerification(env, user.id, user.email, "signup", true);
+    const accepted = await sendVerificationCodeEmail(env, user.email, user.full_name, token, preferredLocale(request));
     if (!accepted) {
       await invalidateToken(env, "email_verifications", token);
       return json({ error: "L'e-mail de confirmation n'a pas pu être envoyé. Réessayez plus tard." }, 503);
     }
-    return json({ message: "Un nouveau lien de confirmation a été envoyé." }, 202);
+    return json({ message: "Un nouveau code de confirmation a été envoyé." }, 202);
   }
 
   if (pathname === "/api/notifications" && request.method === "GET") {
@@ -1260,7 +1302,7 @@ async function handleApi(request: Request, env: Env, ctx: ExecutionContext): Pro
            (SELECT COUNT(*) FROM reviews pair WHERE pair.request_id = rv.request_id) >= 2)`,
       ).bind(profileId).first<{ rating: number | null; review_count: number }>();
       await env.DB.prepare("UPDATE profiles SET rating = ?, review_count = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?")
-        .bind(aggregate?.rating ?? 5, aggregate?.review_count ?? 0, profileId).run();
+        .bind(aggregate?.rating ?? 0, aggregate?.review_count ?? 0, profileId).run();
     }
     return json({ message: "Votre évaluation est enregistrée. Elle sera publiée après l'autre avis ou dans sept jours." }, 201);
   }

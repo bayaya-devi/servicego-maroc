@@ -102,7 +102,7 @@ textarea { min-height:100px;resize:vertical }
 .modal-layer { position:fixed;z-index:60;inset:0;display:grid;place-items:center;padding:18px;background:rgba(20,34,56,.62);backdrop-filter:blur(7px) }
 .modal { position:relative;width:min(540px,100%);max-height:calc(100vh - 36px);overflow:auto;padding:25px;border:1px solid rgba(255,255,255,.5);border-radius:var(--sg-radius);background:var(--sg-surface);box-shadow:var(--sg-shadow-lg) }
 .modal h2 { margin:0 0 6px }.modal .close { position:absolute;top:12px;right:12px }.modal-tabs { display:grid;grid-template-columns:1fr 1fr;gap:4px;margin:17px 0;padding:4px;border-radius:var(--sg-radius);background:var(--sg-canvas) }.modal-tabs button { min-height:42px;border:0;border-radius:6px;color:var(--sg-muted);background:transparent;font-weight:800 }.modal-tabs button.active { color:var(--sg-ink);background:var(--sg-surface);box-shadow:var(--sg-shadow-sm) }
-.form-grid { display:grid;grid-template-columns:1fr 1fr;gap:12px }.field { display:block }.field.full { grid-column:1/-1 }.field span { display:block;margin-bottom:5px;font-size:13px;font-weight:800 }.submit { grid-column:1/-1;width:100%;min-height:50px;margin-top:6px }.form-note { color:var(--sg-muted);font-size:12px;line-height:1.45 }
+.form-grid { display:grid;grid-template-columns:1fr 1fr;gap:12px }.field { display:block }.field.full { grid-column:1/-1 }.field span { display:block;margin-bottom:5px;font-size:13px;font-weight:800 }.submit { grid-column:1/-1;width:100%;min-height:50px;margin-top:6px }.form-note { color:var(--sg-muted);font-size:12px;line-height:1.45 }.form-error { grid-column:1/-1;margin:0;padding:.7rem .85rem;border:1px solid color-mix(in srgb,var(--sg-danger) 62%,transparent);border-radius:8px;background:color-mix(in srgb,var(--sg-danger) 12%,var(--sg-surface));color:var(--sg-danger);font-size:.9rem;line-height:1.35 }
 .offers-list { display:grid;gap:10px;margin-top:16px }.offer { padding:14px;border:1px solid var(--sg-line);border-radius:var(--sg-radius) }.offer strong,.offer small { display:block }.offer small { margin-top:3px;color:var(--sg-muted) }
 .quick-grid { display:grid;grid-template-columns:1fr 1fr;gap:10px }.logout-wide { width:100%;margin-top:18px }
 .notice { position:fixed;z-index:80;bottom:24px;left:50%;transform:translateX(-50%);min-width:min(92vw,320px);max-width:520px;padding:13px 17px;border-radius:var(--sg-radius);color:#fff;background:var(--sg-ink);box-shadow:var(--sg-shadow-lg);text-align:center;font-weight:750 }.notice.error { background:var(--sg-danger) }
@@ -261,7 +261,7 @@ body[data-space="member"] .selection { top:92px;background:var(--sg-glass-member
 }
 
 /* ServiceGO V2.1 public experience */
-body[data-space="visitor"] { background:#dfecef;overflow-x:hidden }
+body[data-space="visitor"] { background:#071722;overflow-x:hidden }
 body.modal-open { overflow:hidden }
 .public-nucleus nav { max-width:calc(100vw - 24px);gap:2px;background:rgba(238,248,250,.52);border-color:rgba(255,255,255,.58);box-shadow:var(--sg-depth-1);backdrop-filter:blur(24px) saturate(135%);transition:width var(--sg-motion) cubic-bezier(.2,.8,.2,1),background var(--sg-motion-fast) ease }
 .public-nucleus.is-expanded nav { background:rgba(238,248,250,.68) }
@@ -483,3 +483,8 @@ body[data-space="member"]::after { background-image:radial-gradient(circle,rgba(
 .real-globe { background:radial-gradient(circle at 50% 44%,#183d57 0,#071927 48%,#02070d 100%);touch-action:none;cursor:grab }
 .real-globe:active { cursor:grabbing }
 .real-globe canvas { display:block;width:100%;height:100% }
+.real-globe.is-globe-loading::before { content:"Chargement du globe…";position:absolute;z-index:2;inset:0;display:grid;place-items:center;color:#eaf8fa;background:#071927cc;font-size:14px;font-weight:800;pointer-events:none }
+.verification-page { min-height:100svh;display:grid;place-items:center;padding:96px 18px 32px;background:linear-gradient(145deg,#e9f5f6,#dcebf4) }
+.verification-card { width:min(500px,100%);padding:28px;border:1px solid var(--sg-glass-border);border-radius:8px;color:var(--sg-ink);background:var(--sg-glass-public-strong);box-shadow:var(--sg-depth-2);backdrop-filter:blur(20px) }
+.verification-card h1 { margin:0 0 12px;font-size:clamp(28px,7vw,38px);line-height:1.15 }.verification-card p { color:var(--sg-muted);line-height:1.6 }.verification-card .text-button { margin-top:12px;display:block }
+html[data-theme="dark"] .verification-page { background:linear-gradient(145deg,#071722,#102b3a) }

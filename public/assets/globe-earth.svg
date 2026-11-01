@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="800" viewBox="0 0 1600 800">
+  <defs><linearGradient id="ocean" x1="0" y1="0" x2="0" y2="1"><stop stop-color="#247fae"/><stop offset=".5" stop-color="#12618f"/><stop offset="1" stop-color="#083f68"/></linearGradient></defs>
+  <rect width="1600" height="800" fill="url(#ocean)"/>
+  <g fill="#82ae62" stroke="#d5d892" stroke-width="3" stroke-linejoin="round">
+    <path d="M130 160 210 112 300 122 350 177 334 224 276 238 253 286 190 276 154 220Z"/><path d="M315 300 365 324 390 402 378 500 340 620 301 558 292 465 264 382Z"/>
+    <path d="M680 132 750 88 855 107 914 152 990 147 1066 185 1055 239 974 257 930 304 842 284 793 328 731 289 684 218Z"/><path d="M760 337 830 365 870 455 840 552 782 630 742 566 750 480 710 409Z"/>
+    <path d="M1015 365 1084 337 1175 362 1214 434 1172 495 1110 487 1080 548 1035 495 982 455Z"/><path d="M1195 570 1270 550 1368 590 1430 654 1360 694 1263 667 1208 628Z"/><path d="M1308 160 1368 136 1430 160 1466 209 1427 246 1360 232Z"/>
+  </g>
+  <g fill="none" stroke="#b9e8ef" stroke-width="3" opacity=".18"><path d="M0 160H1600M0 320H1600M0 480H1600M0 640H1600"/></g>
+</svg>

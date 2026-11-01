@@ -170,6 +170,14 @@ function notify(message, isError = false) {
   document.body.append(element);
   setTimeout(() => element.remove(), 3600);
 }
+function showFormError(form, message) {
+  form.querySelector(".form-error")?.remove();
+  const element = document.createElement("p");
+  element.className = "form-error";
+  element.setAttribute("role", "alert");
+  element.textContent = translate(state.locale, message);
+  form.querySelector('[type="submit"]')?.before(element);
+}
 function coordsFromCity(city) {
   const [lat, lng] = cities[city] || [20, 0];
   return { latitude: lat, longitude: lng };
@@ -244,6 +252,12 @@ function icon(name) {
 }
 function initials(value) {
   return String(value || "ServiceGO").trim().split(/\s+/).slice(0, 2).map((part) => part[0] || "").join("").toUpperCase();
+}
+function ratingPresentation(rating, reviewCount) {
+  const count = Number(reviewCount || 0);
+  return count > 0 && Number.isFinite(Number(rating))
+    ? `${Number(rating).toFixed(1)} / 5 · ${count} ${translate(state.locale, "avis")}`
+    : translate(state.locale, "Pas encore de note");
 }
 function formatDate(value) {
   if (!value) return "";
@@ -497,7 +511,7 @@ function selectedItem() {
     : request
       ? `<button class="button" data-action="open-reply" data-id="${item.id}">Proposer mon aide</button>`
       : `<button class="button green" data-action="open-direct" data-id="${item.id}">Demander ce service</button>`;
-  return `<div class="listing-detail"><div class="listing-type ${request ? "need" : "help"}">${icon(request ? "request" : "offer")}<span>${translate(state.locale, request ? "Demande de service" : "Offre de service")}</span></div><h2>${escape(item.title)}</h2>${photo}<dl class="listing-facts"><div><dt>Catégorie</dt><dd>${escape(translate(state.locale, item.category_name || "Service"))}</dd></div><div><dt>${translate(state.locale, request ? "Budget" : "Prix")}</dt><dd>${escape(translate(state.locale, pricing.full))}</dd></div><div><dt>Localisation approximative</dt><dd>${escape(item.district)}</dd></div>${item.created_at ? `<div><dt>Publication</dt><dd>${escape(formatDate(item.created_at))}</dd></div>` : ""}</dl><p class="listing-description">${escape(item.description)}</p><div class="listing-author"><span class="conversation-avatar">${escape(initials(identity))}</span><div><small>Publié par</small><strong>${escape(identity || translate(state.locale, "Utilisateur ServiceGO"))}</strong>${!request && item.rating ? `<span>${Number(item.rating).toFixed(1)} / 5 · ${item.review_count || 0} ${translate(state.locale, "avis")}</span>` : ""}</div></div><div class="detail-actions">${actions}</div></div>`;
+  return `<div class="listing-detail"><div class="listing-type ${request ? "need" : "help"}">${icon(request ? "request" : "offer")}<span>${translate(state.locale, request ? "Demande de service" : "Offre de service")}</span></div><h2>${escape(item.title)}</h2>${photo}<dl class="listing-facts"><div><dt>Catégorie</dt><dd>${escape(translate(state.locale, item.category_name || "Service"))}</dd></div><div><dt>${translate(state.locale, request ? "Budget" : "Prix")}</dt><dd>${escape(translate(state.locale, pricing.full))}</dd></div><div><dt>Localisation approximative</dt><dd>${escape(item.district)}</dd></div>${item.created_at ? `<div><dt>Publication</dt><dd>${escape(formatDate(item.created_at))}</dd></div>` : ""}</dl><p class="listing-description">${escape(item.description)}</p><div class="listing-author"><span class="conversation-avatar">${escape(initials(identity))}</span><div><small>Publié par</small><strong>${escape(identity || translate(state.locale, "Utilisateur ServiceGO"))}</strong>${!request ? `<span>${ratingPresentation(item.rating, item.review_count)}</span>` : ""}</div></div><div class="detail-actions">${actions}</div></div>`;
 }
 function mapView() {
   return `<main id="main-content" class="workspace premium-map-workspace" tabindex="-1"><section class="map-panel ${state.mapMode === "globe" ? "globe-panel" : ""}"><div class="map-mode-control" role="group" aria-label="Mode de carte"><button class="${state.mapMode === "2d" ? "active" : ""}" data-action="map-mode" data-value="2d">2D</button><button class="${state.mapMode === "globe" ? "active" : ""}" data-action="map-mode" data-value="globe" ${globeSupported() ? "" : "disabled"}>3D</button></div><div id="liveMap" class="real-map ${state.mapMode === "globe" ? "real-globe" : ""}" tabindex="0" aria-label="${state.mapMode === "globe" ? "Globe terrestre interactif. Faites glisser pour tourner et utilisez la molette pour zoomer." : "Carte interactive mondiale. Maintenez appuyé pour créer une demande."}"></div>${state.mapMode === "2d" ? `<button class="map-locate" data-action="locate-me" aria-label="Activer ma localisation">${icon("location")}</button>` : ""}<p class="map-guidance">${state.mapMode === "globe" ? "Explorez le monde en faisant tourner le globe. Sélectionnez une bulle pour ouvrir sa publication." : "Pour demander un service, choisissez un emplacement sur la carte et maintenez votre doigt ou votre souris appuyé. Pour proposer votre aide, sélectionnez une bulle de demande et répondez à son auteur. <button data-action=\"map-create-center\">Utiliser le centre de la carte</button>"}</p></section><aside class="panel selection">${selectedItem()}<details class="accessible-list"><summary>Liste accessible</summary>${accessibleMapList()}</details></aside></main>`;
@@ -570,8 +584,11 @@ function profileView() {
   const visibleServices = state.mine.services.filter((item) => item.available).length;
   const activitySection = prefs.activity ? `<section class="dashboard-section"><header><span>${icon("activity")}</span><div><p class="eyebrow">Mon activité</p><h2>Demandes et services</h2></div></header><div class="dashboard-grid"><article class="panel dashboard-card"><h3>Mes demandes</h3><ul class="profile-list">${requestItems}</ul></article><article class="panel dashboard-card"><h3>Services auxquels j'ai répondu</h3><ul class="profile-list">${repliedItems}</ul></article><article class="panel dashboard-card"><h3>Mes offres de service</h3><ul class="profile-list">${serviceItems}</ul></article></div></section>` : "";
   const exchangesSection = prefs.exchanges ? `<section class="dashboard-section"><header><span>${icon("messages")}</span><div><p class="eyebrow">Mes échanges</p><h2>Conversations</h2></div></header><article class="panel exchange-card"><div><strong>${state.conversations.length}</strong><span>${state.conversations.length > 1 ? "conversations" : "conversation"}</span></div><button class="button secondary" data-action="view" data-view="messages">Ouvrir mes messages</button></article></section>` : "";
-  const trackingSection = prefs.tracking ? `<section class="dashboard-section"><header><span>${icon("clock")}</span><div><p class="eyebrow">Mon suivi</p><h2>Indicateurs réels</h2></div></header><div class="tracking-grid"><article class="panel"><strong>${activeRequests}</strong><span>Demandes actives</span></article><article class="panel"><strong>${completedRequests}</strong><span>Demandes terminées</span></article><article class="panel"><strong>${visibleServices}</strong><span>Services visibles</span></article><article class="panel"><strong>${Number(user.rating || 0).toFixed(1)}</strong><span>${user.review_count || 0} avis</span></article></div><article class="panel dashboard-card reviews-card"><h3>Évaluations reçues</h3><ul class="profile-list">${receivedReviews}</ul></article></section>` : "";
+  const trackingSection = prefs.tracking ? `<section class="dashboard-section"><header><span>${icon("clock")}</span><div><p class="eyebrow">Mon suivi</p><h2>Indicateurs réels</h2></div></header><div class="tracking-grid"><article class="panel"><strong>${activeRequests}</strong><span>Demandes actives</span></article><article class="panel"><strong>${completedRequests}</strong><span>Demandes terminées</span></article><article class="panel"><strong>${visibleServices}</strong><span>Services visibles</span></article><article class="panel"><strong>${Number(user.review_count || 0) ? Number(user.rating).toFixed(1) : "—"}</strong><span>${Number(user.review_count || 0) ? `${user.review_count} avis` : "Pas encore de note"}</span></article></div><article class="panel dashboard-card reviews-card"><h3>Évaluations reçues</h3><ul class="profile-list">${receivedReviews}</ul></article></section>` : "";
   return `<main id="main-content" class="view-page member-page profile-page connection-surface" tabindex="-1"><div class="profile-cover" ${user.cover_url ? `style="background-image:url('${escape(user.cover_url)}')"` : ""}></div><div class="page-heading profile-heading"><div><p class="eyebrow">Tableau de bord</p><h1>Votre espace ServiceGO</h1><p class="page-lead">Votre compte, vos activités et vos échanges au même endroit.</p></div><button class="nucleus-icon profile-settings" data-action="open-settings" aria-label="Paramètres" data-label="Paramètres">${icon("settings")}</button></div><div class="dashboard-sections"><section class="dashboard-section"><header><span>${icon("user")}</span><div><p class="eyebrow">Mon compte</p><h2>Identité et préférences</h2></div></header><article class="panel account-card">${user.avatar_url ? `<img class="avatar profile-photo" src="${escape(user.avatar_url)}" alt="Photo de profil" />` : `<div class="avatar">${escape(initials(user.full_name))}</div>`}<div class="account-copy"><h3>${escape(user.full_name)}</h3><p>${escape(user.email)} · ${escape(user.district)}</p>${user.email_verified ? `<small>Adresse e-mail confirmée</small>` : `<small>Adresse e-mail à confirmer</small>`}</div><div class="profile-actions"><button class="button secondary" data-action="open-profile">Personnaliser</button><button class="button outline" data-action="logout">Se déconnecter</button></div></article></section>${activitySection}${exchangesSection}${trackingSection}${admin}</div></main>`;
+}
+function verificationView() {
+  return `<main id="main-content" class="verification-page" tabindex="-1"><section class="verification-card"><p class="eyebrow">ServiceGO</p><h1>Confirmez votre adresse e-mail</h1><p>Nous avons envoyé un code à <strong>${escape(state.user.email)}</strong>. Saisissez-le pour activer votre compte.</p><form class="form-grid" data-form="verify-email"><label class="field full"><span>Code à 6 chiffres</span><input name="code" inputmode="numeric" autocomplete="one-time-code" pattern="[0-9]{6}" maxlength="6" placeholder="123456" required /></label><button class="button submit" type="submit">Confirmer mon adresse</button></form><button class="text-button" data-action="resend-verification">Renvoyer un code</button><button class="text-button danger-action" data-action="logout">Se déconnecter</button></section></main>`;
 }
 function adminView() {
   const stats = state.adminStats || {};
@@ -634,7 +651,7 @@ function reviewModal() {
 function offersModal() {
   const request = state.offers.request;
   const offers = state.offers.items;
-  return `<div class="modal-layer"><section class="modal"><button class="button icon outline close" data-action="close-modal" aria-label="Fermer">×</button><p class="eyebrow">Réponses reçues</p><h2>${escape(request?.title || translate(state.locale, "Votre demande"))}</h2>${offers.length ? `<div class="offers-list">${offers.map((offer) => `<article class="offer"><strong>${escape(offer.full_name)}</strong><small>${Number(offer.rating || 5).toFixed(1)} / 5 - ${offer.review_count || 0} ${translate(state.locale, "avis")}</small><p>${escape(offer.message)}</p>${offer.price_hint ? `<b>${escape(offer.price_hint)}</b>` : ""}${offer.status === "pending" ? `<button class="button" data-action="accept-offer" data-id="${offer.id}">Accepter cette réponse</button>` : `<span class="offer-status">${escape(translate(state.locale, offer.status))}</span>`}</article>`).join("")}</div>` : `<p class="page-lead">Pas encore de réponse. Votre bulle est toujours visible sur la carte.</p>`}</section></div>`;
+  return `<div class="modal-layer"><section class="modal"><button class="button icon outline close" data-action="close-modal" aria-label="Fermer">×</button><p class="eyebrow">Réponses reçues</p><h2>${escape(request?.title || translate(state.locale, "Votre demande"))}</h2>${offers.length ? `<div class="offers-list">${offers.map((offer) => `<article class="offer"><strong>${escape(offer.full_name)}</strong><small>${ratingPresentation(offer.rating, offer.review_count)}</small><p>${escape(offer.message)}</p>${offer.price_hint ? `<b>${escape(offer.price_hint)}</b>` : ""}${offer.status === "pending" ? `<button class="button" data-action="accept-offer" data-id="${offer.id}">Accepter cette réponse</button>` : `<span class="offer-status">${escape(translate(state.locale, offer.status))}</span>`}</article>`).join("")}</div>` : `<p class="page-lead">Pas encore de réponse. Votre bulle est toujours visible sur la carte.</p>`}</section></div>`;
 }
 function quickModal() {
   return `<div class="modal-layer"><section class="modal quick-modal"><button class="button icon outline close" data-action="close-modal" aria-label="Fermer">×</button><p class="eyebrow">Action rapide</p><h2>Que voulez-vous faire ?</h2><div class="quick-grid"><button class="choice" data-action="open-request"><span class="choice-icon">?</span><span><strong>Demander</strong><small>Publier un besoin</small></span></button><button class="choice green-choice" data-action="open-service"><span class="choice-icon">+</span><span><strong>Proposer</strong><small>Rendre un service visible</small></span></button></div><button class="button outline logout-wide" data-action="logout">Se déconnecter</button></section></div>`;
@@ -714,6 +731,8 @@ function render() {
   const view =
     !state.user || state.view === "home"
       ? homeView()
+      : !state.user.email_verified
+        ? verificationView()
       : state.view === "messages"
         ? messagesView()
         : state.view === "profile"
@@ -1415,6 +1434,19 @@ app.addEventListener("submit", async (event) => {
       });
       const intent = state.pendingIntent;
       state.user = data.user;
+      if (!state.user.email_verified) {
+        state.pendingIntent = intent;
+        state.pendingRoute = null;
+        state.modal = null;
+        render();
+        const verificationMessage = state.authMode === "register"
+          ? data.email_delivery_accepted
+            ? "Saisissez le code envoyé par e-mail pour activer votre compte."
+            : "Compte créé, mais l'e-mail de confirmation n'a pas pu être envoyé. Réessayez avec « Renvoyer un code »."
+          : "Votre adresse e-mail doit être confirmée. Demandez un nouveau code si nécessaire.";
+        notify(verificationMessage, state.authMode === "register" && !data.email_delivery_accepted);
+        return;
+      }
       state.pendingIntent = null;
       state.pendingRoute = null;
       state.modal = null;
@@ -1432,6 +1464,18 @@ app.addEventListener("submit", async (event) => {
             : "Compte créé. L'e-mail de confirmation n'a pas pu être envoyé. Utilisez « Renvoyer le lien » plus tard."
           : "Bienvenue sur ServiceGO.",
       );
+    }
+    if (type === "verify-email") {
+      const data = await api("/api/auth/verify-email", { method: "POST", body: JSON.stringify({ code: values.code }) });
+      state.user = data.user;
+      const intent = state.pendingIntent;
+      state.pendingIntent = null;
+      await navigateToView("map", { replace: true });
+      if (intent === "request") {
+        state.modal = "request";
+        render();
+      }
+      notify(data.message);
     }
     if (type === "forgot") {
       const data = await api("/api/auth/forgot-password", { method: "POST", body: JSON.stringify(values) });
@@ -1602,6 +1646,7 @@ app.addEventListener("submit", async (event) => {
       notify(data.message);
     }
   } catch (error) {
+    showFormError(form, error.message);
     notify(error.message, true);
   } finally {
     if (submitButton?.isConnected) submitButton.disabled = false;
